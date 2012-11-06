@@ -46,19 +46,32 @@
  * issues and should be optimal for the uncontended case. Note the tail must be
  * in the high part, because a wide xadd increment of the low part would carry
  * up and contaminate the high part.
+ * http://studyfoss.egloos.com/5144295
  */
 static __always_inline void __ticket_spin_lock(arch_spinlock_t *lock)
 {
 	register struct __raw_tickets inc = { .tail = 1 };
-
+	/* inc = 원래값= lock->tickets
+	 * lock->tickets += inc
+	 * 이번 티켓을 발급한다. (head)
+	 */
 	inc = xadd(&lock->tickets, inc);
-
-	for (;;) {
+	for (;;) {		
+		/* 글자가 짧아서 while보다 for를 선호, VC에서는 warning?
+		 * while파와 for 파가 전쟁중
+		 */
 		if (inc.head == inc.tail)
+			/* 자신의 티켓과(tail) 현재 순서를(head) 비교한다. 락을 얻었으면 break */
 			break;
+/* Pentium4 이상에서는 rep nop는 pause 명령으로 동작하고
+ * 이전 프로세서에서는 단순한 nop로 동작한다.
+ * pause는 스핀락에서 cpu에 힌트를 제공해 성능을 증가시키고 전력소모를 줄인다. */
 		cpu_relax();
+		/* 자기 순서라면 head가 같은 값으로 갱신된다 */
 		inc.head = ACCESS_ONCE(lock->tickets.head);
+	/* 자신의 티켓 순서를 기다리며 spin */
 	}
+	/* 컴파일러가 memory reordering을 못하게 메모리 장벽을 친다. */
 	barrier();		/* make sure nothing creeps before the lock is taken */
 }
 
@@ -78,6 +91,8 @@ static __always_inline int __ticket_spin_trylock(arch_spinlock_t *lock)
 
 static __always_inline void __ticket_spin_unlock(arch_spinlock_t *lock)
 {
+  /* head를 증가시킨다. (unlock), 이전(3.2)에서는 inline asm이
+   * 있었는데, 3.7에서는 (inline asm) 매크로로 다시 한번 감쌌음. */
 	__add(&lock->tickets.head, 1, UNLOCK_LOCK_PREFIX);
 }
 
@@ -168,9 +183,15 @@ static inline int arch_write_can_lock(arch_rwlock_t *lock)
 {
 	return lock->write == WRITE_LOCK_CMP;
 }
-
+/* readers writers lock 모뎀로 cpu가 2048개 이하면
+ * read lock(20비트)와 write lock(12비트) 를 32비트로 같이 사용한다.
+ * 2048개를 초과하면 64비트를 반으로 나눠서 사용한다.
+ * R-R는 부호 비트가 켜지지 않을 경우 (0xfffff~0) 계속 획득할수 있으며
+ * W-R, W-W, R-W 로 락이 걸리면 상호 배제되며 끝날때까지 spin하며 대기한다.
+ */
 static inline void arch_read_lock(arch_rwlock_t *rw)
 {
+	/* 감소시켜 보고 획득 못하면 스핀도는 루틴을 호출 */
 	asm volatile(LOCK_PREFIX READ_LOCK_SIZE(dec) " (%0)\n\t"
 		     "jns 1f\n"
 		     "call __read_lock_failed\n\t"
@@ -180,6 +201,10 @@ static inline void arch_read_lock(arch_rwlock_t *rw)
 
 static inline void arch_write_lock(arch_rwlock_t *rw)
 {
+	/* lock 프리픽스로 다른명령어가 끼어들수 없게 한다.
+	 * 두가지 경우가 있는데 dec면 그냥 1을 감소 (cpu수>2048)
+	 * sub면 BIAS (0x100000==1M) 감소 (cpu<=2048)해서 0이면 락을 획득하였다.
+	 */
 	asm volatile(LOCK_PREFIX WRITE_LOCK_SUB(%1) "(%0)\n\t"
 		     "jz 1f\n"
 		     "call __write_lock_failed\n\t"
@@ -213,7 +238,7 @@ static inline void arch_read_unlock(arch_rwlock_t *rw)
 	asm volatile(LOCK_PREFIX READ_LOCK_SIZE(inc) " %0"
 		     :"+m" (rw->lock) : : "memory");
 }
-
+/* 쓰기는 상위 바이어스 값 혹은 하위 4바이트  */
 static inline void arch_write_unlock(arch_rwlock_t *rw)
 {
 	asm volatile(LOCK_PREFIX WRITE_LOCK_ADD(%1) "%0"

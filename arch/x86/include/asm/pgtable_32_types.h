@@ -6,6 +6,7 @@
  * implements both the traditional 2-level x86 page tables and the
  * newer 3-level PAE-mode page tables.
  */
+/* PAE가 켜져있으면 3레벨 아니면 2레벨, PMD_SHIFT수가 다르다. */
 #ifdef CONFIG_X86_PAE
 # include <asm/pgtable-3level_types.h>
 # define PMD_SIZE	(1UL << PMD_SHIFT)
@@ -41,8 +42,10 @@ extern bool __vmalloc_start_set; /* set once high_memory is set */
 		    & PMD_MASK)
 
 #ifdef CONFIG_HIGHMEM
+/* HIGHMEM이 켜있으면 -8KB */
 # define VMALLOC_END	(PKMAP_BASE - 2 * PAGE_SIZE)
 #else
+/* HIGHMEM이 없으면 메모리 끝은 4G 부근 */
 # define VMALLOC_END	(FIXADDR_START - 2 * PAGE_SIZE)
 #endif
 

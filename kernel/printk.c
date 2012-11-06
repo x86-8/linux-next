@@ -702,6 +702,7 @@ static int __init log_buf_len_setup(char *str)
 }
 early_param("log_buf_len", log_buf_len_setup);
 
+/* 이 함수는 cmdline에서 log_buf_len이 설정되어야 호출된다. */
 void __init setup_log_buf(int early)
 {
 	unsigned long flags;
@@ -710,7 +711,7 @@ void __init setup_log_buf(int early)
 
 	if (!new_log_buf_len)
 		return;
-
+	/* 메모리 할당 */
 	if (early) {
 		unsigned long mem;
 
@@ -733,6 +734,7 @@ void __init setup_log_buf(int early)
 	log_buf = new_log_buf;
 	new_log_buf_len = 0;
 	free = __LOG_BUF_LEN - log_next_idx;
+	/* log를 복사 */
 	memcpy(log_buf, __log_buf, __LOG_BUF_LEN);
 	raw_spin_unlock_irqrestore(&logbuf_lock, flags);
 

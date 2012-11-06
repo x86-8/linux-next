@@ -95,7 +95,7 @@ static int __init setup_add_efi_memmap(char *arg)
 	return 0;
 }
 early_param("add_efi_memmap", setup_add_efi_memmap);
-
+/* add_efi_memmap옵션이 오면 efi memmap을 e820에 추가한다. */
 
 static efi_status_t virt_efi_get_time(efi_time_t *tm, efi_time_cap_t *tc)
 {
@@ -302,7 +302,7 @@ unsigned long efi_get_time(void)
  * more than the max 128 entries that can fit in the e820 legacy
  * (zeropage) memory map.
  */
-
+/* efi 영역을 e820에 타입에 맞춰서 추가한다 */
 static void __init do_add_efi_memmap(void)
 {
 	void *p;
@@ -319,6 +319,7 @@ static void __init do_add_efi_memmap(void)
 		case EFI_BOOT_SERVICES_CODE:
 		case EFI_BOOT_SERVICES_DATA:
 		case EFI_CONVENTIONAL_MEMORY:
+ /* 속성에서 writeback이면 사용가능 아니면 예약 (나중에 기록?) */
 			if (md->attribute & EFI_MEMORY_WB)
 				e820_type = E820_RAM;
 			else
@@ -362,6 +363,7 @@ int __init efi_memblock_x86_reserve_range(void)
 	pmap = (boot_params.efi_info.efi_memmap |
 		((__u64)boot_params.efi_info.efi_memmap_hi<<32));
 #endif
+	/* 부트 파라미터에서 efi memmap 물리주소 대입 */
 	memmap.phys_map = (void *)pmap;
 	memmap.nr_map = boot_params.efi_info.efi_memmap_size /
 		boot_params.efi_info.efi_memdesc_size;
@@ -378,7 +380,7 @@ static void __init print_efi_memmap(void)
 	efi_memory_desc_t *md;
 	void *p;
 	int i;
-
+	/* 형식에 맞춰서 efi정보들을 출력 */
 	for (p = memmap.map, i = 0;
 	     p < memmap.map_end;
 	     p += memmap.desc_size, i++) {
@@ -401,6 +403,7 @@ void __init efi_reserve_boot_services(void)
 		u64 start = md->phys_addr;
 		u64 size = md->num_pages << EFI_PAGE_SHIFT;
 
+		/* CODE나 DATA일때만 실행 */
 		if (md->type != EFI_BOOT_SERVICES_CODE &&
 		    md->type != EFI_BOOT_SERVICES_DATA)
 			continue;
@@ -410,16 +413,23 @@ void __init efi_reserve_boot_services(void)
 		 * - Not within any part of the kernel
 		 * - Not the bios reserved area
 		*/
+		/* 아래 조건에 해당되지 않아야 한다.
+		 * 1. 서로 겹치는것 (포함, 일부겹침등)
+		 * 2. 블럭이 e820의 해당 타입으로 연속적으로 겹칠때
+		 * 3. memblock에 겹쳐 예약불가능한것. (혹은 예약된 영역에 완전히 속할때)
+		 */
 		if ((start+size >= virt_to_phys(_text)
 				&& start <= virt_to_phys(_end)) ||
 			!e820_all_mapped(start, start+size, E820_RAM) ||
 			memblock_is_region_reserved(start, size)) {
 			/* Could not reserve, skip it */
 			md->num_pages = 0;
+			/* 예약불가능 출력 */
 			memblock_dbg("Could not reserve boot range "
 					"[0x%010llx-0x%010llx]\n",
 						start, start+size-1);
 		} else
+      /* 예약할수 있다. EFI boot로 예약한다. */
 			memblock_reserve(start, size);
 	}
 }
@@ -458,6 +468,7 @@ void __init efi_free_boot_services(void)
 	efi_unmap_memmap();
 }
 
+/* EFI : Extensible Firmware Interface */
 static int __init efi_systab_init(void *phys)
 {
 	if (efi_64bit) {
@@ -496,6 +507,7 @@ static int __init efi_systab_init(void *phys)
 		tmp |= systab64->tables;
 
 		early_iounmap(systab64, sizeof(*systab64));
+	/* 32비트면 systab만 64비트면 systab_hi를 위에 붙인다. */
 #ifdef CONFIG_X86_32
 		if (tmp >> 32) {
 			pr_err("EFI data located above 4GB, disabling EFI.\n");
@@ -504,7 +516,8 @@ static int __init efi_systab_init(void *phys)
 #endif
 	} else {
 		efi_system_table_32_t *systab32;
-
+    
+    /* efi의 물리주소를 slot 에(fixed_addresses의 끝부분)과 연결한다. */
 		systab32 = early_ioremap((unsigned long)phys,
 					 sizeof(*systab32));
 		if (systab32 == NULL) {
@@ -525,7 +538,7 @@ static int __init efi_systab_init(void *phys)
 		efi_systab.boottime = (void *)(unsigned long)systab32->boottime;
 		efi_systab.nr_tables = systab32->nr_tables;
 		efi_systab.tables = systab32->tables;
-
+    
 		early_iounmap(systab32, sizeof(*systab32));
 	}
 
@@ -534,11 +547,12 @@ static int __init efi_systab_init(void *phys)
 	/*
 	 * Verify the EFI Table
 	 */
+  /* 시그니쳐 검사 */
 	if (efi.systab->hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE) {
 		pr_err("System table signature incorrect!\n");
 		return -EINVAL;
 	}
-	if ((efi.systab->hdr.revision >> 16) == 0)
+	if ((efi.systab->hdr.revision >> 16) == 0) /* 버전 체크 최소 1.0 이상이어야 한다. */
 		pr_err("Warning: System table version "
 		       "%d.%02d, expected 1.00 or greater!\n",
 		       efi.systab->hdr.revision >> 16,
@@ -560,6 +574,7 @@ static int __init efi_config_init(u64 tables, int nr_tables)
 	/*
 	 * Let's see what config tables the firmware passed to us.
 	 */
+	/* 테이블 갯수만큼 매핑 */
 	config_tables = early_ioremap(tables, nr_tables * sz);
 	if (config_tables == NULL) {
 		pr_err("Could not map Configuration table!\n");
@@ -568,6 +583,7 @@ static int __init efi_config_init(u64 tables, int nr_tables)
 
 	tablep = config_tables;
 	pr_info("");
+	/* guid를 장치 비교후 같으면 대입 & 출력 */
 	for (i = 0; i < efi.systab->nr_tables; i++) {
 		efi_guid_t guid;
 		unsigned long table;
@@ -631,6 +647,7 @@ static int __init efi_runtime_init(void)
 	 * address of several of the EFI runtime functions, needed to
 	 * set the firmware into virtual mode.
 	 */
+	/* 런타임 서비스들의 테이블을 매핑한다. */
 	runtime = early_ioremap((unsigned long)efi.systab->runtime,
 				sizeof(efi_runtime_services_t));
 	if (!runtime) {
@@ -659,6 +676,7 @@ static int __init efi_runtime_init(void)
 static int __init efi_memmap_init(void)
 {
 	/* Map the EFI memory map */
+	/* 대입된 efi memmap 영역을 매핑한 상태로 그대로 간다. */
 	memmap.map = early_ioremap((unsigned long)memmap.phys_map,
 				   memmap.nr_map * memmap.desc_size);
 	if (memmap.map == NULL) {
@@ -666,7 +684,6 @@ static int __init efi_memmap_init(void)
 		return -ENOMEM;
 	}
 	memmap.map_end = memmap.map + (memmap.nr_map * memmap.desc_size);
-
 	if (add_efi_memmap)
 		do_add_efi_memmap();
 

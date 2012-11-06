@@ -40,7 +40,7 @@ void
 __mutex_init(struct mutex *lock, const char *name, struct lock_class_key *key)
 {
 	atomic_set(&lock->count, 1);
-	spin_lock_init(&lock->wait_lock);
+	spin_lock_init(&lock->wait_lock); // lockdep 관련 : http://studyfoss.egloos.com/5342153
 	INIT_LIST_HEAD(&lock->wait_list);
 	mutex_clear_owner(lock);
 
@@ -131,8 +131,8 @@ EXPORT_SYMBOL(mutex_unlock);
  */
 static inline int __sched
 __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
-		    struct lockdep_map *nest_lock, unsigned long ip)
-{
+		    		    struct lockdep_map *nest_lock, unsigned long ip)
+{ 
 	struct task_struct *task = current;
 	struct mutex_waiter waiter;
 	unsigned long flags;
@@ -160,16 +160,24 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 	 */
 
 	for (;;) {
-		struct task_struct *owner;
+	
+
+
+	struct task_struct *owner;
 
 		/*
 		 * If there's an owner, wait for it to either
 		 * release the lock or go to sleep.
 		 */
+		/* volatile로 읽는다. */
 		owner = ACCESS_ONCE(lock->owner);
+		/*lock->owner == NULL이 돼었을때 빠져나온다. */
 		if (owner && !mutex_spin_on_owner(lock, owner))
 			break;
-
+		/* count가 1이면 락을 얻고 1을 리턴
+		 * 락을 얻으면 이 루틴 실행
+		 * 락을 못없으면 for문을 돌면서 계속 시도한다.
+		 */
 		if (atomic_cmpxchg(&lock->count, 1, 0) == 1) {
 			lock_acquired(&lock->dep_map, ip);
 			mutex_set_owner(lock);
@@ -228,7 +236,7 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 		 */
 		if (unlikely(signal_pending_state(state, task))) {
 			mutex_remove_waiter(lock, &waiter,
-					    task_thread_info(task));
+					    ask_thread_info(task));
 			mutex_release(&lock->dep_map, 1, ip);
 			spin_unlock_mutex(&lock->wait_lock, flags);
 
@@ -398,6 +406,7 @@ EXPORT_SYMBOL(mutex_lock_killable);
 static __used noinline void __sched
 __mutex_lock_slowpath(atomic_t *lock_count)
 {
+	/* mutex 구조체의 시작 주소를 구한다. */
 	struct mutex *lock = container_of(lock_count, struct mutex, count);
 
 	__mutex_lock_common(lock, TASK_UNINTERRUPTIBLE, 0, NULL, _RET_IP_);

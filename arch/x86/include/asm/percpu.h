@@ -2,9 +2,11 @@
 #define _ASM_X86_PERCPU_H
 
 #ifdef CONFIG_X86_64
+	/* 64비트면 gs */
 #define __percpu_seg		gs
 #define __percpu_mov_op		movq
 #else
+	/* 32비트면 fs */
 #define __percpu_seg		fs
 #define __percpu_mov_op		movl
 #endif
@@ -23,6 +25,7 @@
  * Example:
  *    PER_CPU(cpu_gdt_descr, %ebx)
  */
+/* PER_CPU로 이 CPU에 해당하는 segment 영역으로 억세스 */
 #ifdef CONFIG_SMP
 #define PER_CPU(var, reg)						\
 	__percpu_mov_op %__percpu_seg:this_cpu_off, reg;		\
@@ -65,6 +68,7 @@
 #define __percpu_prefix		""
 #endif
 
+ /* x가 0이면 %0 오퍼랜드를 뜻한다. %%gs: %P0 */
 #define __percpu_arg(x)		__percpu_prefix "%P" #x
 
 /*
@@ -87,6 +91,7 @@
  * don't give an lvalue though). */
 extern void __bad_percpu_size(void);
 
+/* percpu_xxxx_op의 인자는 (op, dest, src) 로 인텔어셈과 유사하다. */
 #define percpu_to_op(op, var, val)			\
 do {							\
 	typedef typeof(var) pto_T__;			\
@@ -179,6 +184,16 @@ do {									\
 	}								\
 } while (0)
 
+ /* 
+  * percpu_arg는 percpu구조체가 있는 영역(gs)을 prefix로 가리킨다.
+  * 64비트는 percpu의 segment는 gs, 32비트는 fs이다.
+  * 이 값을 var인자로 온 값을 pfo_ret__로 선언해서 리턴한다.
+  * var 크기에 따라 op size 또한 변한다. (case 1: byte, case 2: word...)
+  * ( output의 q는 ax,bx,cx,dx / r은 general register)
+  * 
+  * 예를 들면 var 크기가 2byte일때 아래 라인과 같다.
+  * movw gs:[var], [pfo_ret__]
+  */
 #define percpu_from_op(op, var, constraint)		\
 ({							\
 	typeof(var) pfo_ret__;				\
@@ -355,10 +370,17 @@ do {									\
  * accessed while this_cpu_read_stable() allows the value to be cached.
  * this_cpu_read_stable() is more efficient and can be used if its value
  * is guaranteed to be valid across cpus.  The current users include
+ *
  * get_current() and get_thread_info() both of which are actually
  * per-thread variables implemented as per-cpu variables and thus
  * stable for the duration of the respective task.
  */
+ /*
+  * 첫번째 인자는 명령어 ex. "mov"
+  * 두번째는 읽을 값
+  * 세번째는 gcc inline asm의 input type
+  */
+ /* stable은 포인터를 통해 값을 읽어온다. %p =  An operand that is a valid memory address is allowed*/
 #define this_cpu_read_stable(var)	percpu_from_op("mov", var, "p" (&(var)))
 
 #define __this_cpu_read_1(pcp)		percpu_from_op("mov", (pcp), "m"(pcp))

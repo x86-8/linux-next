@@ -43,6 +43,7 @@ struct memblock {
 extern struct memblock memblock;
 extern int memblock_debug;
 
+/* memblock_debug가 켜있으면 메세지 출력 */
 #define memblock_dbg(fmt, ...) \
 	if (memblock_debug) printk(KERN_INFO pr_fmt(fmt), ##__VA_ARGS__)
 
@@ -147,6 +148,7 @@ phys_addr_t memblock_alloc_try_nid(phys_addr_t size, phys_addr_t align, int nid)
 phys_addr_t memblock_alloc(phys_addr_t size, phys_addr_t align);
 
 /* Flags for memblock_alloc_base() amd __memblock_alloc_base() */
+/* ANYWHERE는 64비트로 0xfffff.... */
 #define MEMBLOCK_ALLOC_ANYWHERE	(~(phys_addr_t)0)
 #define MEMBLOCK_ALLOC_ACCESSIBLE	0
 
@@ -223,7 +225,7 @@ static inline unsigned long memblock_region_reserved_end_pfn(const struct memblo
 {
 	return PFN_UP(reg->base + reg->size);
 }
-
+/* memblock중 memblock_type에 해당하는 영역을 모두 탐색 */
 #define for_each_memblock(memblock_type, region)					\
 	for (region = memblock.memblock_type.regions;				\
 	     region < (memblock.memblock_type.regions + memblock.memblock_type.cnt);	\

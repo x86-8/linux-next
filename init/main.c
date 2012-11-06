@@ -386,15 +386,25 @@ static noinline void __init_refok rest_init(void)
 }
 
 /* Check for early params. */
+/* init = ... init_setup
+ * console = ... 이면 console_setup 안에 있는 함수를 찾아본다.
+ * __setup_start (.init.setup) 영역에 __setup로 등록된
+ * early 부분을 체크한다.
+ */
 static int __init do_early_param(char *param, char *val, const char *unused)
 {
 	const struct obs_kernel_param *p;
-
+	/* __setup_param 매크로로 등록된 부분은 모두
+	 * .init.setup에 들어간다.
+	 * 그러면 해당 옵션과 매칭되는 함수를 호출한다.
+	 */
 	for (p = __setup_start; p < __setup_end; p++) {
+	  /* early가 1이면 early 함수다. early인 함수만 호출 */
 		if ((p->early && parameq(param, p->str)) ||
 		    (strcmp(param, "console") == 0 &&
 		     strcmp(p->str, "earlycon") == 0)
 		) {
+			/* 파라미터 처리 함수를 호출하고 실패하면 경고 */
 			if (p->setup_func(val) != 0)
 				printk(KERN_WARNING
 				       "Malformed early option '%s'\n", param);
@@ -427,11 +437,12 @@ void __init parse_early_param(void)
 /*
  *	Activate the first processor.
  */
-
+/* boot cpu 번호를 받아서 상태를 모두 1로 만든다.  */
 static void __init boot_cpu_init(void)
 {
 	int cpu = smp_processor_id();
 	/* Mark the boot cpu "present", "online" etc for SMP and UP case */
+	/* 해당 cpu 비트에 해당하는 상태를(online,active,present,possible) 모두 true로 셋 */
 	set_cpu_online(cpu, true);
 	set_cpu_active(cpu, true);
 	set_cpu_present(cpu, true);
@@ -464,27 +475,44 @@ static void __init mm_init(void)
 	pgtable_cache_init();
 	vmalloc_init();
 }
-
+/* #define __init		__section(.init.text) __cold notrace
+ * __init 매크로는 함수를 .init 섹션에 몰아넣는다.
+ */
 asmlinkage void __init start_kernel(void)
 {
 	char * command_line;
 	extern const struct kernel_param __start___param[], __stop___param[];
-
 	/*
 	 * Need to run as early as possible, to initialize the
 	 * lockdep hash:
 	 */
+	/* lockdep hash table list 초기화
+	 * 디버깅 관련 초기화
+	 */
 	lockdep_init();
+	/* weak으로 선언한 빈 함수 특정 아키텍쳐에서만 함수가 존재한다. */
 	smp_setup_processor_id();
 	debug_objects_early_init();
 
 	/*
 	 * Set up the the initial canary ASAP:
 	 */
+	/* 스택 오버플로우 방지를 위한 함수 초기화 */
 	boot_init_stack_canary();
 
+	/* cgroup을 재빨리 초기화 한다. */
 	cgroup_init_early();
-
+ 
+/**
+ * local_irq_disable   
+ * arch_local_irq_disable -> native_irq_disable는 인터럽트를 금지(cli)
+ * native_irq_enable은 인터럽트 허용(sti)
+ *
+ * local_irq_enable/disable은 인터럽트를 허용/금지한다.
+ * local_irq_save는 플래그 상태를 인자에 저장하고 인터럽트를 금지한다.
+ * local_irq_restore는 플래그 상태를 복원한다. 때문에 인터럽트 허용/금지상태까지 복원한다.
+ * local_irq_save/restore -> raw_local_irq_save/restore -> native_save/restore_fl
+ */
 	local_irq_disable();
 	early_boot_irqs_disabled = true;
 
@@ -492,10 +520,14 @@ asmlinkage void __init start_kernel(void)
  * Interrupts are still disabled. Do necessary setups, then
  * enable them
  */
+	/* 참조: http://blog.daum.net/english_100/69 */
 	tick_init();
+	/* boot cpu 상태를 모두 1로 설정 */
 	boot_cpu_init();
 	page_address_init();
+	/* 리눅스, gcc 버전등의 linux banner 정보 출력 */
 	printk(KERN_NOTICE "%s", linux_banner);
+	/* 아키텍쳐 종속적인 초기화 루틴 */
 	setup_arch(&command_line);
 	mm_init_owner(&init_mm, &init_task);
 	mm_init_cpumask(&init_mm);
@@ -627,6 +659,7 @@ asmlinkage void __init start_kernel(void)
 	taskstats_init_early();
 	delayacct_init();
 
+	/* alternative 코드도 검사/치환 */
 	check_bugs();
 
 	acpi_early_init(); /* before LAPIC and SMP init */

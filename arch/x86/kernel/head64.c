@@ -60,6 +60,8 @@ void __init x86_64_start_kernel(char * real_mode_data)
 	 * Build-time sanity checks on the kernel image and module
 	 * area mappings. (these are purely build-time and produce no code)
 	 */
+	/* 문제 있으면 BUILD_BUG_ON 매크로로 컴파일시 에러가 뜬다. */
+	/* 커널 이미지 크기가 커서 모듈 주소를 침범하면 에러발생 */
 	BUILD_BUG_ON(MODULES_VADDR < KERNEL_IMAGE_START);
 	BUILD_BUG_ON(MODULES_VADDR-KERNEL_IMAGE_START < KERNEL_IMAGE_SIZE);
 	BUILD_BUG_ON(MODULES_LEN + KERNEL_IMAGE_SIZE > 2*PUD_SIZE);
@@ -71,21 +73,22 @@ void __init x86_64_start_kernel(char * real_mode_data)
 	BUILD_BUG_ON(__fix_to_virt(__end_of_fixed_addresses) <= MODULES_END);
 
 	/* clear bss before set_intr_gate with early_idt_handler */
+	/* bss 초기화 (__bss_start부터 __bss_stop) */
 	clear_bss();
 
 	/* Make NULL pointers segfault */
 	zap_identity_mappings();
 
-	max_pfn_mapped = KERNEL_IMAGE_SIZE >> PAGE_SHIFT;
-
+	max_pfn_mapped = KERNEL_IMAGE_SIZE >> PAGE_SHIFT; /* 512M / 4K  매핑되는 최대 페이지 프레임 넘버*/
+	/* 예외 처리 인터럽트들 설정 */
 	for (i = 0; i < NUM_EXCEPTION_VECTORS; i++) {
 #ifdef CONFIG_EARLY_PRINTK
-		set_intr_gate(i, &early_idt_handlers[i]);
+		set_intr_gate(i, &early_idt_handlers[i]); /* 인터럽트 예외처리 루틴들을 쓴다. */
 #else
 		set_intr_gate(i, early_idt_handler);
 #endif
 	}
-	load_idt((const struct desc_ptr *)&idt_descr);
+	load_idt((const struct desc_ptr *)&idt_descr); /* lidt로 interrupt descriptor table을 읽어온다. */
 
 	if (console_loglevel == 10)
 		early_printk("Kernel alive\n");
@@ -95,13 +98,15 @@ void __init x86_64_start_kernel(char * real_mode_data)
 
 void __init x86_64_start_reservations(char *real_mode_data)
 {
-	copy_bootdata(__va(real_mode_data));
+	copy_bootdata(__va(real_mode_data)); /* &boot_params에 복사 */
 
+	/* text부터 bss까지의 커널 영역을 memblock에 예약한다. */
 	memblock_reserve(__pa_symbol(&_text),
 			 __pa_symbol(&__bss_stop) - __pa_symbol(&_text));
 
 #ifdef CONFIG_BLK_DEV_INITRD
 	/* Reserve INITRD */
+	/* 같이 로드한 INITRD(init ramdisk) 영역도 예약한다. */
 	if (boot_params.hdr.type_of_loader && boot_params.hdr.ramdisk_image) {
 		/* Assume only end is not page aligned */
 		unsigned long ramdisk_image = boot_params.hdr.ramdisk_image;
@@ -111,13 +116,13 @@ void __init x86_64_start_reservations(char *real_mode_data)
 	}
 #endif
 
-	reserve_ebda_region();
+	reserve_ebda_region();		/* EBDA 메모리 영역을 예약해놓았다. */
 
 	/*
 	 * At this point everything still needed from the boot loader
 	 * or BIOS or kernel text should be early reserved or marked not
 	 * RAM in e820. All other memory is free game.
-	 */
-
+	 /* int 15h 서 예약된 부분과 커널/바이오스/부트로더 코드영역
+	  * 외의 메모리 공간은 예약되어있지 않다. */
 	start_kernel();
 }

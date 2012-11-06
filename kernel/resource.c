@@ -164,18 +164,25 @@ static struct resource * __request_resource(struct resource *root, struct resour
 		return root;
 	if (end > root->end)
 		return root;
+	/* 이 루틴은 유사 tree로 root->child->sibling->sib...로 연결되며
+	 * 모든 sibling의 부모는 root다.
+	 * start와 end값을 참고하여, 오름차순으로 맞는 위치에 new를 삽입 */
 	p = &root->child;
 	for (;;) {
 		tmp = *p;
+		/* new의 끝부분 보다 tmp(기존의 있던)의 첫부분이 뒤에 있으면
+		 * tmp를 밀어내고 new를 삽입후 NULL리턴(정상적)  */
 		if (!tmp || tmp->start > end) {
 			new->sibling = tmp;
 			*p = new;
 			new->parent = root;
 			return NULL;
 		}
+		/* 충돌하지 않으면 다음 형제 노드를 탐색 */
 		p = &tmp->sibling;
 		if (tmp->end < start)
 			continue;
+		/* 충돌시, 기존의 sibling 반환 */
 		return tmp;
 	}
 }
@@ -239,11 +246,10 @@ void release_child_resources(struct resource *r)
 struct resource *request_resource_conflict(struct resource *root, struct resource *new)
 {
 	struct resource *conflict;
-
-	write_lock(&resource_lock);
-	conflict = __request_resource(root, new);
+	write_lock(&resource_lock); /* 쓰기 락을 건다. */
+	conflict = __request_resource(root, new); /* new 자원을 root에 추가한다. (오름차순) */
 	write_unlock(&resource_lock);
-	return conflict;
+	return conflict;	/* 충돌난 포인터, 0이면 성공 */
 }
 
 /**
@@ -258,7 +264,7 @@ int request_resource(struct resource *root, struct resource *new)
 	struct resource *conflict;
 
 	conflict = request_resource_conflict(root, new);
-	return conflict ? -EBUSY : 0;
+	return conflict ? -EBUSY : 0; /* 실패면 EBUSY */
 }
 
 EXPORT_SYMBOL(request_resource);
@@ -285,6 +291,7 @@ EXPORT_SYMBOL(release_resource);
  * the caller must specify res->start, res->end, res->flags and "name".
  * If found, returns 0, res is overwritten, if not found, returns -1.
  */
+/* io 유사트리 자원에서 해당 영역이 있으면 0이상 못찾으면 -1 */
 static int find_next_system_ram(struct resource *res, char *name)
 {
 	resource_size_t start, end;
@@ -299,14 +306,18 @@ static int find_next_system_ram(struct resource *res, char *name)
 	read_lock(&resource_lock);
 	for (p = iomem_resource.child; p ; p = p->sibling) {
 		/* system ram is just marked as IORESOURCE_MEM */
+		/* 플래그가 같지 않으면 패스 */
 		if (p->flags != res->flags)
 			continue;
+		/* 해당 string 일치하지 않으면 패스 */
 		if (name && strcmp(p->name, name))
 			continue;
+		/* 겹치지 않으면 못찾았기 때문에 더 검색할 필요가 없다. */
 		if (p->start > end) {
 			p = NULL;
 			break;
 		}
+		/* (부분적으로 혹은 전체가) 겹치면 */
 		if ((p->end >= start) && (p->start < end))
 			break;
 	}
@@ -314,6 +325,7 @@ static int find_next_system_ram(struct resource *res, char *name)
 	if (!p)
 		return -1;
 	/* copy data */
+	/* 얻은 자원 주소가 더 작으면 그걸로 대체 */
 	if (res->start < p->start)
 		res->start = p->start;
 	if (res->end > p->end)
@@ -326,6 +338,7 @@ static int find_next_system_ram(struct resource *res, char *name)
  * which are marked as IORESOURCE_MEM and IORESOUCE_BUSY.
  * Now, this function is only for "System RAM".
  */
+/* 못찾으면 -1을 리턴 */
 int walk_system_ram_range(unsigned long start_pfn, unsigned long nr_pages,
 		void *arg, int (*func)(unsigned long, unsigned long, void *))
 {
@@ -333,17 +346,20 @@ int walk_system_ram_range(unsigned long start_pfn, unsigned long nr_pages,
 	unsigned long pfn, end_pfn;
 	u64 orig_end;
 	int ret = -1;
-
+	/* 페이지의 첫주소와 끝주소 */
 	res.start = (u64) start_pfn << PAGE_SHIFT;
 	res.end = ((u64)(start_pfn + nr_pages) << PAGE_SHIFT) - 1;
 	res.flags = IORESOURCE_MEM | IORESOURCE_BUSY;
 	orig_end = res.end;
+	/* 주소가 정상적이고(start<end) System RAM으로 등록되어있으면 */
 	while ((res.start < res.end) &&
 		(find_next_system_ram(&res, "System RAM") >= 0)) {
 		pfn = (res.start + PAGE_SIZE - 1) >> PAGE_SHIFT;
 		end_pfn = (res.end + 1) >> PAGE_SHIFT;
+		/* 해당 페이지 프레임이 차이가 나면 callback 함수 호출 */
 		if (end_pfn > pfn)
 			ret = (*func)(pfn, end_pfn - pfn, arg);
+		/* 1이면 종료 */
 		if (ret)
 			break;
 		res.start = res.end + 1;
@@ -364,6 +380,9 @@ static int __is_ram(unsigned long pfn, unsigned long nr_pages, void *arg)
  */
 int __weak page_is_ram(unsigned long pfn)
 {
+	/* 여기서 __is_ram은 무조건 참이다.
+	 * system 자원에서 해당 주소를 찾으면
+	 */
 	return walk_system_ram_range(pfn, 1, NULL, __is_ram) == 1;
 }
 
@@ -591,38 +610,47 @@ static struct resource * __insert_resource(struct resource *parent, struct resou
 
 	for (;; parent = first) {
 		first = __request_resource(parent, new);
+		/* request로 등록해보고 등록되면 리턴 No conflict */
 		if (!first)
 			return first;
 
+		/* 같으면 리턴, 한번 돌고나면 여기서 빠진다. Conflict */
 		if (first == parent)
 			return first;
-		if (WARN_ON(first == new))	/* duplicated insertion */
+		/* duplicated insertion */
+		if (WARN_ON(first == new))
 			return first;
-
+		/* 처음이나 끝 둘중 더 큰 범위라면 뷁 */
 		if ((first->start > new->start) || (first->end < new->end))
 			break;
+		/* 완전히 똑같다면 */
 		if ((first->start == new->start) && (first->end == new->end))
 			break;
 	}
 
+	/* 삽입할 블럭(new)이 더 크거나 같으면 브레이크 */
 	for (next = first; ; next = next->sibling) {
 		/* Partial overlap? Bad, and unfixable */
+		/* 부분적으로 겹치는 경우는 conflict된 상태 */
 		if (next->start < new->start || next->end > new->end)
 			return next;
+		/* next->sibling이 겹치치 않는 경우(next가 겹칠 수도 있음)
+		 * 또는 sibling이 없는 경우는 추가하기 위해 break */
 		if (!next->sibling)
 			break;
 		if (next->sibling->start > new->end)
 			break;
 	}
-
-	new->parent = parent;
+	/* new가 더 크기때문에 new가 부모가 된다. */
+	new->parent = parent;	
 	new->sibling = next->sibling;
+	/* i'm your father */
 	new->child = first;
-
+	/* sibling들을 돌면서 parent와 sibling을 바꿔준다. */
 	next->sibling = NULL;
 	for (next = first; next; next = next->sibling)
 		next->parent = new;
-
+	/* 자식이 child인 경우와 sibling일 경우 다르게 처리 */
 	if (parent->child == first) {
 		parent->child = new;
 	} else {
@@ -664,6 +692,7 @@ struct resource *insert_resource_conflict(struct resource *parent, struct resour
  *
  * Returns 0 on success, -EBUSY if the resource can't be inserted.
  */
+/* 해당 리소스를 삽입한다. */
 int insert_resource(struct resource *parent, struct resource *new)
 {
 	struct resource *conflict;

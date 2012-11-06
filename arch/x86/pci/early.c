@@ -6,12 +6,14 @@
 
 /* Direct PCI access. This is used for PCI accesses in early boot before
    the PCI subsystem works. */
-
+/* 특정 pci 장치를 읽는다.  */
 u32 read_pci_config(u8 bus, u8 slot, u8 func, u8 offset)
 {
 	u32 v;
-	outl(0x80000000 | (bus<<16) | (slot<<11) | (func<<8) | offset, 0xcf8);
-	v = inl(0xcfc);
+	/**< 인덱스에 특정 pci 장치를 읽어오겠다고 전달한다. */
+	/* 0xcf8은 CONFIG_ADDRESS다. */
+	outl(0x80000000 | (bus<<16) | (slot<<10) | (func<<8) | offset, 0xcf8);
+	v = inl(0xcfc); ///< CONFIG_DATA(0xcf8)에서 index에 해당하는 값을 읽는다.
 	return v;
 }
 
@@ -34,6 +36,7 @@ u16 read_pci_config_16(u8 bus, u8 slot, u8 func, u8 offset)
 void write_pci_config(u8 bus, u8 slot, u8 func, u8 offset,
 				    u32 val)
 {
+	/* index port(cf8)에 offset(register)값을 넣고 data(cfc)포트에 쓴다. */
 	outl(0x80000000 | (bus<<16) | (slot<<11) | (func<<8) | offset, 0xcf8);
 	outl(val, 0xcfc);
 }
@@ -52,6 +55,10 @@ void write_pci_config_16(u8 bus, u8 slot, u8 func, u8 offset, u16 val)
 
 int early_pci_allowed(void)
 {
+	/*!
+	 *  NOEARLY가 꺼져있으면 TRUE다.
+	 * 즉, EARLY면 참을 리턴한다.
+	 */
 	return (pci_probe & (PCI_PROBE_CONF1|PCI_PROBE_NOEARLY)) ==
 			PCI_PROBE_CONF1;
 }
@@ -78,7 +85,9 @@ void early_dump_pci_device(u8 bus, u8 slot, u8 func)
 	printk("\n");
 }
 
+/* pci 장치를을 dump 하고 print  */
 void early_dump_pci_devices(void)
+
 {
 	unsigned bus, slot, func;
 
@@ -95,7 +104,7 @@ void early_dump_pci_devices(void)
 							PCI_CLASS_REVISION);
 				if (class == 0xffffffff)
 					continue;
-
+ /* pci 장치를들 출력 해주는걸로 보임 */
 				early_dump_pci_device(bus, slot, func);
 
 				if (func == 0) {

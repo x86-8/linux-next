@@ -169,10 +169,12 @@ void __init __acpi_unmap_table(char *map, unsigned long size)
 }
 
 #ifdef CONFIG_X86_LOCAL_APIC
+/* MADT 엔트리 정보 파싱 핸들러 */
 static int __init acpi_parse_madt(struct acpi_table_header *table)
 {
 	struct acpi_table_madt *madt = NULL;
 
+	/* APIC가 없는 경우 에러 */
 	if (!cpu_has_apic)
 		return -EINVAL;
 
@@ -182,6 +184,7 @@ static int __init acpi_parse_madt(struct acpi_table_header *table)
 		return -ENODEV;
 	}
 
+	/* MADT 엔트리에 주소 정보가 있는 경우, acpi_lapic_addr갱신 */
 	if (madt->address) {
 		acpi_lapic_addr = (u64) madt->address;
 
@@ -189,6 +192,7 @@ static int __init acpi_parse_madt(struct acpi_table_header *table)
 		       madt->address);
 	}
 
+	/* 각 APIC 드라이버 마다 MADT oem_check 함수 실행  */
 	default_acpi_madt_oem_check(madt->header.oem_id,
 				    madt->header.oem_table_id);
 
@@ -873,16 +877,18 @@ static int __init early_acpi_parse_madt_lapic_addr_ovr(void)
 	 * Note that the LAPIC address is obtained from the MADT (32-bit value)
 	 * and (optionally) overriden by a LAPIC_ADDR_OVR entry (64-bit value).
 	 */
-
+	/* 64비트로 Override된다면 갯수를 얻어온다 */
 	count =
 	    acpi_table_parse_madt(ACPI_MADT_TYPE_LOCAL_APIC_OVERRIDE,
 				  acpi_parse_lapic_addr_ovr, 0);
+	/* MADT시그니쳐의 엔트리가 없을 경우 */
 	if (count < 0) {
 		printk(KERN_ERR PREFIX
 		       "Error parsing LAPIC address override entry\n");
 		return count;
 	}
 
+	/* acpi_lapic_addr를 fixmap에 매핑 */
 	register_lapic_address(acpi_lapic_addr);
 
 	return count;
@@ -1216,12 +1222,12 @@ static inline int acpi_parse_madt_ioapic_entries(void)
 	return -1;
 }
 #endif	/* !CONFIG_X86_IO_APIC */
-
+/* MADT에서 lapic 정보를 얻는다. */
 static void __init early_acpi_process_madt(void)
 {
 #ifdef CONFIG_X86_LOCAL_APIC
 	int error;
-
+	/* lapci 주소는 acpi_parse_madt에서 대입된다. */
 	if (!acpi_table_parse(ACPI_SIG_MADT, acpi_parse_madt)) {
 
 		/*
@@ -1312,7 +1318,7 @@ static int __init disable_acpi_irq(const struct dmi_system_id *d)
 	}
 	return 0;
 }
-
+/* acpi 금지 */
 static int __init disable_acpi_pci(const struct dmi_system_id *d)
 {
 	if (!acpi_force) {
@@ -1499,9 +1505,20 @@ static struct dmi_system_id __initdata acpi_dmi_table_late[] = {
  *	acpi_irq_model=...
  *	...
  */
-
+/**
+ * @date   Sat Aug 11 20:18:59 2012
+ * 
+ * @brief  
+ * acpi_table_init() dd to allow reading SRAT without other side effects.
+ * 
+ */
 void __init acpi_boot_table_init(void)
 {
+
+	/**
+	 * DMI 정보를 확인 & 콜백 함수 호출
+	 * 특정 장치들(blacklist)의 예외처리 - dmi_disable_acpi()
+	 */
 	dmi_check_system(acpi_dmi_table);
 
 	/*
@@ -1513,11 +1530,12 @@ void __init acpi_boot_table_init(void)
 	/*
 	 * Initialize the ACPI boot-time table parser.
 	 */
+	/* acpi table 초기화가 실패하면 disable_acpi() */
 	if (acpi_table_init()) {
 		disable_acpi();
 		return;
 	}
-
+	/* "BOOT" acpi 테이블 검사  */
 	acpi_table_parse(ACPI_SIG_BOOT, acpi_parse_sbf);
 
 	/*
@@ -1539,6 +1557,7 @@ int __init early_acpi_boot_init(void)
 	/*
 	 * If acpi_disabled, bail out
 	 */
+	 /* ACPI가 비활성화 되어 있는 경우 - 블랙리스트 처리되었음 */
 	if (acpi_disabled)
 		return 1;
 
@@ -1629,6 +1648,7 @@ early_param("pci", parse_pci);
 
 int __init acpi_mps_check(void)
 {
+/* MPS 코드는 지원 안함, LOCAL_APIC가 켜진 상태에서 acpi를 사용불가능하면 워닝 */
 #if defined(CONFIG_X86_LOCAL_APIC) && !defined(CONFIG_X86_MPPARSE)
 /* mptable code is not built-in*/
 	if (acpi_disabled || acpi_noirq) {

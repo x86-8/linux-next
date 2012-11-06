@@ -61,7 +61,9 @@ static int __initdata debug_print;
 
 #define BIOS_BUG_MSG KERN_WARNING \
 	"WARNING: BIOS bug: VAR MTRR %d contains strange UC entry under 1M, check with your system vendor!\n"
-
+/* WB를 *range 배열에 merge하면서 정리해 넣고
+ * UC와 WP는 이 range 영역에서 빼고 정렬한다.
+ */
 static int __init
 x86_get_mtrr_mem_range(struct range *range, int nr_range,
 		       unsigned long extra_remove_base,
@@ -70,13 +72,14 @@ x86_get_mtrr_mem_range(struct range *range, int nr_range,
 	unsigned long base, size;
 	mtrr_type type;
 	int i;
-
+	/* WB영역중 중첩되는 range를 합친다. */
 	for (i = 0; i < num_var_ranges; i++) {
 		type = range_state[i].type;
 		if (type != MTRR_TYPE_WRBACK)
-			continue;
+			continue; /* WB가 아니면 패스 */
 		base = range_state[i].base_pfn;
 		size = range_state[i].size_pfn;
+		/* WB영역중에서 중첩되는 부분을 합쳐서 range 배열에 넣는다. */
 		nr_range = add_range_with_merge(range, RANGE_NUM, nr_range,
 						base, base + size);
 	}
@@ -90,6 +93,7 @@ x86_get_mtrr_mem_range(struct range *range, int nr_range,
 	/* Take out UC ranges: */
 	for (i = 0; i < num_var_ranges; i++) {
 		type = range_state[i].type;
+		/* UC나 WP가 아니면 패스 */
 		if (type != MTRR_TYPE_UNCACHABLE &&
 		    type != MTRR_TYPE_WRPROT)
 			continue;
@@ -97,6 +101,10 @@ x86_get_mtrr_mem_range(struct range *range, int nr_range,
 		if (!size)
 			continue;
 		base = range_state[i].base_pfn;
+		/* base는 4KB 단위다. 256 이하, 즉 1M 이하이면서
+		 * fixed(1M) mtrr가 있으면서 enable인 예외상황을 가리킨다.
+		 * 즉 fixed mtrr과 variable mtrr이 중첩되서 생기는 버그 경고이다.
+		 */
 		if (base < (1<<(20-PAGE_SHIFT)) && mtrr_state.have_fixed &&
 		    (mtrr_state.enabled & 1)) {
 			/* Var MTRR contains UC entry below 1M? Skip it: */
@@ -106,9 +114,10 @@ x86_get_mtrr_mem_range(struct range *range, int nr_range,
 			size -= (1<<(20-PAGE_SHIFT)) - base;
 			base = 1<<(20-PAGE_SHIFT);
 		}
+		/* WB가 모인 range에서 UC, WP영역과 겹치는 부분을 뺀다. */
 		subtract_range(range, RANGE_NUM, base, base + size);
 	}
-	if (extra_remove_size)
+	if (extra_remove_size)	/* 인자로 들어온 4G 넘는 영역을 빼준다. */
 		subtract_range(range, RANGE_NUM, extra_remove_base,
 				 extra_remove_base + extra_remove_size);
 
@@ -123,7 +132,7 @@ x86_get_mtrr_mem_range(struct range *range, int nr_range,
 	}
 
 	/* sort the ranges */
-	nr_range = clean_sort_range(range, RANGE_NUM);
+	nr_range = clean_sort_range(range, RANGE_NUM); /* 정렬 */
 	if  (debug_print) {
 		printk(KERN_DEBUG "After sorting\n");
 		for (i = 0; i < nr_range; i++)
@@ -142,7 +151,7 @@ static unsigned long __init sum_ranges(struct range *range, int nr_range)
 	int i;
 
 	for (i = 0; i < nr_range; i++)
-		sum += range[i].end - range[i].start;
+		sum += range[i].end - range[i].start; /* 사이즈를 다 더한다. */
 
 	return sum;
 }
@@ -308,27 +317,31 @@ range_to_mtrr_with_hole(struct var_mtrr_state *state, unsigned long basek,
 	second_sizek = 0;
 	chunk_sizek = state->chunk_sizek;
 	gran_sizek = state->gran_sizek;
+	// http://www.kerneltrap.com/mailarchive/git-commits-head/2008/7/14/2470124/thread
 
 	/* Align with gran size, prevent small block used up MTRRs: */
+	/* state의 시작주소를 올림정렬한다. */
 	range_basek = ALIGN(state->range_startk, gran_sizek);
-	if ((range_basek > basek) && basek)
+	if ((range_basek > basek) && basek) /* 정렬한 state의 시작값이 인자로 들어온 블럭 시작값보다 크면 종료 */
 		return second_sizek;
-
+	/* 정렬된 앞쪽 크기만큼 잘라준다. (크기를 뺀다.) */
 	state->range_sizek -= (range_basek - state->range_startk);
+	/* 끝부분 역시 gran 크기로 정렬한다. */
 	range_sizek = ALIGN(state->range_sizek, gran_sizek);
-
+	/* range_size가 정렬 되었으면 gran 블럭만큼 빼주면서 뒷부분을 자른다. */
 	while (range_sizek > state->range_sizek) {
 		range_sizek -= gran_sizek;
-		if (!range_sizek)
+		if (!range_sizek) /* 크기가 0이면 쫑 */
 			return 0;
 	}
-	state->range_sizek = range_sizek;
+	state->range_sizek = range_sizek; /* state에 크기를 업데이트 */
 
 	/* Try to append some small hole: */
 	range0_basek = state->range_startk;
 	range0_sizek = ALIGN(state->range_sizek, chunk_sizek);
 
 	/* No increase: */
+	/* gran크기로 내림정렬한 것이 chunk로 정렬되어 있으면   */
 	if (range0_sizek == state->range_sizek) {
 		Dprintk("rangeX: %016lx - %016lx\n",
 			range0_basek<<10,
@@ -420,6 +433,7 @@ set_var_mtrr_range(struct var_mtrr_state *state, unsigned long base_pfn,
 	sizek = size_pfn << (PAGE_SHIFT - 10);
 
 	/* See if I can merge with the last range: */
+	/* 1M 이하거나 연속적인 블럭이면 state 구조체에 size를 더하고 리텐한다. */
 	if ((basek <= 1024) ||
 	    (state->range_startk + state->range_sizek == basek)) {
 		unsigned long endk = basek + sizek;
@@ -427,6 +441,7 @@ set_var_mtrr_range(struct var_mtrr_state *state, unsigned long base_pfn,
 		return;
 	}
 	/* Write the range mtrrs: */
+	/* 연속적이지 않은 블럭이면 함수를 호출 */
 	if (state->range_sizek != 0)
 		second_sizek = range_to_mtrr_with_hole(state, basek, sizek);
 
@@ -481,9 +496,10 @@ x86_setup_var_mtrrs(struct range *range, int nr_range,
 	var_state.range_startk	= 0;
 	var_state.range_sizek	= 0;
 	var_state.reg		= 0;
+	/* chunk와 gran은 KB 사이즈다 */
 	var_state.chunk_sizek	= chunk_size >> 10;
 	var_state.gran_sizek	= gran_size >> 10;
-
+	/* 사용한 range_state를 다시 초기화한다. */
 	memset(range_state, 0, sizeof(range_state));
 
 	/* Write the range: */
@@ -552,37 +568,42 @@ static void __init print_out_mtrr_range_state(void)
 			);
 	}
 }
-
+/* 클린업 여부 체크 */
 static int __init mtrr_need_cleanup(void)
 {
 	int i;
 	mtrr_type type;
 	unsigned long size;
 	/* Extra one for all 0: */
-	int num[MTRR_NUM_TYPES + 1];
+	int num[MTRR_NUM_TYPES + 1]; /* 64비트 MTRR 타입은 8개 */
 
 	/* Check entries number: */
 	memset(num, 0, sizeof(num));
+	/* MTRR을 돌면서 각 타입 개수를 카운트한다. */
 	for (i = 0; i < num_var_ranges; i++) {
 		type = range_state[i].type;
 		size = range_state[i].size_pfn;
 		if (type >= MTRR_NUM_TYPES)
 			continue;
-		if (!size)
+		if (!size)	/* 사이즈가 0인 타입은 따로 센다 */
 			type = MTRR_NUM_TYPES;
-		num[type]++;
+		num[type]++;	/* 이 타입의 갯수 증가 */
 	}
 
 	/* Check if we got UC entries: */
+	/* UC가 없으면 클린업할 필요 없음 */
 	if (!num[MTRR_TYPE_UNCACHABLE])
 		return 0;
 
 	/* Check if we only had WB and UC */
+	/* MTRR 총합(크기0 제외)이 WB수+UC수가 같지 않으면 리턴
+	 * WB+ UC로만 이루어진 경우는 클린업이 필요하다.
+	 */
 	if (num[MTRR_TYPE_WRBACK] + num[MTRR_TYPE_UNCACHABLE] !=
 	    num_var_ranges - num[MTRR_NUM_TYPES])
 		return 0;
-
-	return 1;
+	/* UC가 있고 WB+UC only면 cleanup */
+	return 1;		/* clean이 필요하다. */
 }
 
 static unsigned long __initdata range_sums;
@@ -682,16 +703,18 @@ int __init mtrr_cleanup(unsigned address_bits)
 	mtrr_type type;
 	int index_good;
 	int i;
-
+	/* 인텔이 아니거나 mtrr이 cleanup 되어 있으면 리턴 */
 	if (!is_cpu(INTEL) || enable_mtrr_cleanup < 1)
 		return 0;
-
+	/* 인텔이면서 mtrr이 cleanup 안되어 있어야 계속 진행 */
 	rdmsr(MSR_MTRRdefType, def, dummy);
 	def &= 0xff;
+	/* MTRR 기본 타입이 UC가 아니면 리턴  */
 	if (def != MTRR_TYPE_UNCACHABLE)
 		return 0;
 
 	/* Get it and store it aside: */
+	/* MTRR 값을 읽는다. */
 	memset(range_state, 0, sizeof(range_state));
 	for (i = 0; i < num_var_ranges; i++) {
 		mtrr_if->get(i, &base, &size, &type);
@@ -710,23 +733,24 @@ int __init mtrr_cleanup(unsigned address_bits)
 
 	memset(range, 0, sizeof(range));
 	x_remove_size = 0;
-	x_remove_base = 1 << (32 - PAGE_SHIFT);
-	if (mtrr_tom2)
+	x_remove_base = 1 << (32 - PAGE_SHIFT); /* 시작주소는 4G */
+	if (mtrr_tom2)		/* TOP_MEM 윗부분, AMD의 특별한 경우에만 존재? */
 		x_remove_size = (mtrr_tom2 >> PAGE_SHIFT) - x_remove_base;
-
+	/* WB가 모인 range중 UC, WP를 빼고 x_remove영역도 빼고 sort 한다. */
 	nr_range = x86_get_mtrr_mem_range(range, 0, x_remove_base, x_remove_size);
 	/*
 	 * [0, 1M) should always be covered by var mtrr with WB
 	 * and fixed mtrrs should take effect before var mtrr for it:
 	 */
+	/* 하위 1M 영역을 add & merge */
 	nr_range = add_range_with_merge(range, RANGE_NUM, nr_range, 0,
 					1ULL<<(20 - PAGE_SHIFT));
 	/* Sort the ranges: */
-	sort_range(range, nr_range);
+	sort_range(range, nr_range); /* 정렬한다. */
 
-	range_sums = sum_ranges(range, nr_range);
+	range_sums = sum_ranges(range, nr_range); /* range 영역들의 합 */
 	printk(KERN_INFO "total RAM covered: %ldM\n",
-	       range_sums >> (20 - PAGE_SHIFT));
+	       range_sums >> (20 - PAGE_SHIFT)); /* 메가 단위로 출력 */
 
 	if (mtrr_chunk_size && mtrr_gran_size) {
 		i = 0;
@@ -882,14 +906,16 @@ int __init mtrr_trim_uncached_memory(unsigned long end_pfn)
 	 */
 	if (!is_cpu(INTEL) || disable_mtrr_trim)
 		return 0;
-
+	/* 인텔 MTRR을 위한 루틴 */
 	rdmsr(MSR_MTRRdefType, def, dummy);
 	def &= 0xff;
+	/* MTRR을 지원 안하면 종료 */
 	if (def != MTRR_TYPE_UNCACHABLE)
 		return 0;
 
 	/* Get it and store it aside: */
 	memset(range_state, 0, sizeof(range_state));
+	/* mtrr_state에 값을 넣어준다. */
 	for (i = 0; i < num_var_ranges; i++) {
 		mtrr_if->get(i, &base, &size, &type);
 		range_state[i].base_pfn = base;
@@ -904,18 +930,20 @@ int __init mtrr_trim_uncached_memory(unsigned long end_pfn)
 			continue;
 		base = range_state[i].base_pfn;
 		size = range_state[i].size_pfn;
+		/* 가장 높은 WB 의 end를 구한다. */
 		if (highest_pfn < base + size)
 			highest_pfn = base + size;
 	}
 
 	/* kvm/qemu doesn't have mtrr set right, don't trim them all: */
-	if (!highest_pfn) {
+	if (!highest_pfn) {	/* 가상머신에서 최대값이 0일때 예외처리 */
 		printk(KERN_INFO "CPU MTRRs all blank - virtualized system.\n");
 		return 0;
 	}
 
 	/* Check entries number: */
 	memset(num, 0, sizeof(num));
+	/* 타입별로 갯수 카운트 */
 	for (i = 0; i < num_var_ranges; i++) {
 		type = range_state[i].type;
 		if (type >= MTRR_NUM_TYPES)
@@ -927,6 +955,7 @@ int __init mtrr_trim_uncached_memory(unsigned long end_pfn)
 	}
 
 	/* No entry for WB? */
+	/* 아니 WB가 0이라니! */
 	if (!num[MTRR_TYPE_WRBACK])
 		return 0;
 
@@ -944,37 +973,41 @@ int __init mtrr_trim_uncached_memory(unsigned long end_pfn)
 			highest_pfn = range[nr_range].end;
 		nr_range++;
 	}
+	/* range영역을 정리하고 정렬한다. */
 	nr_range = x86_get_mtrr_mem_range(range, nr_range, 0, 0);
 
 	/* Check the head: */
 	total_trim_size = 0;
+	/* start가 0이 아니면 앞부분을 trim */
 	if (range[0].start)
 		total_trim_size += real_trim_memory(0, range[0].start);
-
+	/* MTRR의 WB영역 사이의 빈 공간중 e820에 RAM영역이 있으면 예약됨으로 업데이트한다. */
 	/* Check the holes: */
 	for (i = 0; i < nr_range - 1; i++) {
 		if (range[i].end < range[i+1].start)
 			total_trim_size += real_trim_memory(range[i].end,
 							    range[i+1].start);
 	}
-
+	/* total_trim_size는 trim되서 reserved된 크기 */
 	/* Check the top: */
 	i = nr_range - 1;
+	/* 현재 끝에서 최대 페이지 넘버값까지 역시 trim한다. */
 	if (range[i].end < end_pfn)
 		total_trim_size += real_trim_memory(range[i].end,
 							 end_pfn);
 
 	if (total_trim_size) {
+		/* trim된 영역이 있으면 알려준다. */
 		pr_warning("WARNING: BIOS bug: CPU MTRRs don't cover all of memory, losing %lluMB of RAM.\n", total_trim_size >> 20);
 
 		if (!changed_by_mtrr_cleanup)
 			WARN_ON(1);
 
 		pr_info("update e820 for mtrr\n");
-		update_e820();
+		update_e820();	/* e820이 변경되었으니 update한다. */
 
-		return 1;
+		return 1;	/* 1이면 trim이 되었다. */
 	}
 
-	return 0;
+	return 0;		/* trim이 안되었다. */
 }

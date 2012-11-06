@@ -1489,6 +1489,7 @@ static __init void disable_x2apic(void)
 	}
 }
 
+/* x2apic는 apic를 확장한 xapic를 확장한 intel의 확장스펙이다. */
 void check_x2apic(void)
 {
 	if (x2apic_enabled()) {
@@ -1780,13 +1781,18 @@ void __init register_lapic_address(unsigned long address)
 {
 	mp_lapic_addr = address;
 
+	/* x2apic 모드가 지원되지 않는 경우 */
 	if (!x2apic_mode) {
+		/* APIC fixmap 페이지를 address로 매핑 */
 		set_fixmap_nocache(FIX_APIC_BASE, address);
 		apic_printk(APIC_VERBOSE, "mapped APIC to %16lx (%16lx)\n",
 			    APIC_BASE, mp_lapic_addr);
 	}
+	/* 부트될때 apicid가 설정이 되어 있지 않은 경우 */
 	if (boot_cpu_physical_apicid == -1U) {
+		/* apicid를 재설정 */
 		boot_cpu_physical_apicid  = read_apic_id();
+		/* APICID에 맞는 APIC_LVR(0x30)을 읽어 버전 정보 추출하여 저장 */
 		apic_version[boot_cpu_physical_apicid] =
 			 GET_APIC_VERSION(apic_read(APIC_LVR));
 	}
@@ -1796,6 +1802,7 @@ void __init register_lapic_address(unsigned long address)
  * This initializes the IO-APIC and APIC hardware if this is
  * a UP kernel.
  */
+ /* 64비트는 최대 32768개 생성 */
 int apic_version[MAX_LOCAL_APIC];
 
 int __init APIC_init_uniprocessor(void)

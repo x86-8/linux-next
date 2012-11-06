@@ -96,6 +96,11 @@ static inline int alternatives_text_reserved(void *start, void *end)
 #define ALTINSTR_REPLACEMENT(newinstr, feature, number)	/* replacement */     \
 	b_replacement(number)":\n\t" newinstr "\n" e_replacement(number) ":\n\t"
 
+/* old와 new의 두가지 코드와 메타데이터를 두가지 섹션에 만들어놓고
+ * 나중에 런타임으로 체크(alternative_instruction -> apply_alternatives)해서
+ * new 코드를 old에 덮어씌운다.
+ * 치환하기 전까지는 oldinstr이 실행된다.
+ */
 /* alternative assembly primitive: */
 #define ALTERNATIVE(oldinstr, newinstr, feature)			\
 	OLDINSTR(oldinstr)						\
@@ -175,6 +180,10 @@ static inline int alternatives_text_reserved(void *start, void *end)
  * If CPU has feature2, function2 is used.
  * Otherwise, if CPU has feature1, function1 is used.
  * Otherwise, old function is used.
+ */
+/* alternative_call 함수에 feature2가 추가된 것과 같음. feature1과 2를
+ * 받아서, feature2가 있으면 2번 함수를 아니면, feature1이 있으면 1번
+ * 함수를 실행.  없으면, 가장 기본(old) 함수 실행
  */
 #define alternative_call_2(oldfunc, newfunc1, feature1, newfunc2, feature2,   \
 			   output, input...)				      \

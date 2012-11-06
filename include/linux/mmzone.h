@@ -270,7 +270,7 @@ enum zone_type {
 	 * Architecture		Limit
 	 * ---------------------------
 	 * parisc, ia64, sparc	<4G
-	 * s390			<2G
+	 * s390			<G2
 	 * arm			Various
 	 * alpha		Unlimited or 0-16MB.
 	 *

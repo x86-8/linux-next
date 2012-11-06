@@ -74,7 +74,7 @@ enum {
 	PAT_WB = 6,		/* Write Back (default) */
 	PAT_UC_MINUS = 7,	/* UC, but can be overriden by MTRR */
 };
-
+/* x번째 바이트에 y값을 넣는다. */
 #define PAT(x, y)	((u64)PAT_ ## y << ((x)*8))
 
 void pat_init(void)
@@ -82,9 +82,9 @@ void pat_init(void)
 	u64 pat;
 	bool boot_cpu = !boot_pat_state;
 
-	if (!pat_enabled)
+	if (!pat_enabled)	/* default = ON */
 		return;
-
+	/* cpu PAT 지원여부 체크 */
 	if (!cpu_has_pat) {
 		if (!boot_pat_state) {
 			pat_disable("PAT not supported by CPU.");
@@ -114,13 +114,16 @@ void pat_init(void)
 	 *      011 UC		_PAGE_CACHE_UC
 	 * PAT bit unused
 	 */
+	/* PAT는 PTE(4K) 혹은 PDE(4M,2M)의 PAT, PCD, PWT로 조합되어 사용된다.
+	 * WB, WC는 enum값
+	 */
 	pat = PAT(0, WB) | PAT(1, WC) | PAT(2, UC_MINUS) | PAT(3, UC) |
 	      PAT(4, WB) | PAT(5, WC) | PAT(6, UC_MINUS) | PAT(7, UC);
 
 	/* Boot CPU check */
 	if (!boot_pat_state)
 		rdmsrl(MSR_IA32_CR_PAT, boot_pat_state);
-
+	/* PAT 레지스터 값을 초기화한다. */
 	wrmsrl(MSR_IA32_CR_PAT, pat);
 
 	if (boot_cpu)
@@ -268,6 +271,7 @@ static int free_ram_pages_type(u64 start, u64 end)
  * available type in new_type in case of no error. In case of any error
  * it will return a negative return value.
  */
+
 int reserve_memtype(u64 start, u64 end, unsigned long req_type,
 		    unsigned long *new_type)
 {
@@ -280,6 +284,8 @@ int reserve_memtype(u64 start, u64 end, unsigned long req_type,
 
 	if (!pat_enabled) {
 		/* This is identical to page table setting without PAT */
+		/* PAT가 설정이 안되어 있고 new_type이 있는 경우
+		 * req_type에 따라 new_type설정 */
 		if (new_type) {
 			if (req_type == _PAGE_CACHE_WC)
 				*new_type = _PAGE_CACHE_UC_MINUS;
@@ -290,6 +296,8 @@ int reserve_memtype(u64 start, u64 end, unsigned long req_type,
 	}
 
 	/* Low ISA region is always mapped WB in page table. No need to track */
+	/* start, end영역이 640KB~16M 영역인지 체크한 뒤, CACHE_WB로 설정.
+	   is_untracked_pat_range = is_ISA_range(u64 s, u64 e) */
 	if (x86_platform.is_untracked_pat_range(start, end)) {
 		if (new_type)
 			*new_type = _PAGE_CACHE_WB;
@@ -316,7 +324,7 @@ int reserve_memtype(u64 start, u64 end, unsigned long req_type,
 	} else if (is_range_ram < 0) {
 		return -EINVAL;
 	}
-
+	/* memtype 구조체만큼 할당 */
 	new  = kzalloc(sizeof(struct memtype), GFP_KERNEL);
 	if (!new)
 		return -ENOMEM;

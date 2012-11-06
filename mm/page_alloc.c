@@ -2663,6 +2663,7 @@ unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order)
 	 * __get_free_pages() returns a 32-bit address, which cannot represent
 	 * a highmem page
 	 */
+	/* DEBUG_VM 이 켜있으면 HIGHMEM이 아닌지 체크한다. */
 	VM_BUG_ON((gfp_mask & __GFP_HIGHMEM) != 0);
 
 	page = alloc_pages(gfp_mask, order);
@@ -4271,6 +4272,8 @@ static unsigned long __meminit zone_spanned_pages_in_node(int nid,
  * Return the number of holes in a range on a node. If nid is MAX_NUMNODES,
  * then all holes in the requested range will be accounted for.
  */
+/* node 메모리 영역안에서, 영역과 차이나는 경우에 비어있는
+ * 영역(hole)들을 전부 셈한다 */
 unsigned long __meminit __absent_pages_in_range(int nid,
 				unsigned long range_start_pfn,
 				unsigned long range_end_pfn)

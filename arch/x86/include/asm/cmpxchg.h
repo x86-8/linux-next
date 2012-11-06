@@ -80,6 +80,9 @@ extern void __add_wrong_size(void)
  * store NEW in MEM.  Return the initial value in MEM.  Success is
  * indicated by comparing RETURN with OLD.
  */
+/* old 값과 ptr 값을 비교해서 같으면 new=ptr, old 값을 리턴한다.
+ * 다르면 new(al) 값을 리턴한다.
+ */
 #define __raw_cmpxchg(ptr, old, new, size, lock)			\
 ({									\
 	__typeof__(*(ptr)) __ret;					\
@@ -162,6 +165,7 @@ extern void __add_wrong_size(void)
  * xadd_sync() is always locked
  * xadd_local() is never locked
  */
+/* ptr에는 inc값이 더해지고 __ret는 원래값을 반환 */
 #define __xadd(ptr, inc, lock)	__xchg_op((ptr), (inc), xadd, lock)
 #define xadd(ptr, inc)		__xadd((ptr), (inc), LOCK_PREFIX)
 #define xadd_sync(ptr, inc)	__xadd((ptr), (inc), "lock; ")

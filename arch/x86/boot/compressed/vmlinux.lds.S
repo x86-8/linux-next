@@ -21,14 +21,18 @@ SECTIONS
 	 * address 0.
 	 */
 	. = 0;
+	/* 재배치후에는 이부분은 덮어쓴다.. */
 	.head.text : {
 		_head = . ;
+	/* #define HEAD_TEXT *(.head.text) */
 		HEAD_TEXT
 		_ehead = . ;
 	}
+	/* 압축 커널부분 */
 	.rodata..compressed : {
 		*(.rodata..compressed)
 	}
+	/* 안전한 커널코드 */
 	.text :	{
 		_text = .; 	/* Text */
 		*(.text)
@@ -43,6 +47,7 @@ SECTIONS
 	}
 	.got : {
 		_got = .;
+	/* 제거하면 안되는 영역 */
 		KEEP(*(.got.plt))
 		KEEP(*(.got))
 		_egot = .;
@@ -53,6 +58,7 @@ SECTIONS
 		*(.data.*)
 		_edata = . ;
 	}
+	/* cache line 크기로 정렬 */
 	. = ALIGN(L1_CACHE_BYTES);
 	.bss : {
 		_bss = . ;
@@ -62,6 +68,7 @@ SECTIONS
 		. = ALIGN(8);	/* For convenience during zeroing */
 		_ebss = .;
 	}
+/* 64비트에서만 pgtable 추가 */
 #ifdef CONFIG_X86_64
        . = ALIGN(PAGE_SIZE);
        .pgtable : {

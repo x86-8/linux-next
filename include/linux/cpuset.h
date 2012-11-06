@@ -97,6 +97,9 @@ extern void cpuset_print_task_mems_allowed(struct task_struct *p);
  */
 static inline unsigned int get_mems_allowed(void)
 {
+  /* 이전(3.2)에서 smp_mb가 밖으로 나와 있었지만,
+   * 현재(3.7-rc4)는 read_seqcount_begin()으로 wrap되었음
+   */
 	return read_seqcount_begin(&current->mems_allowed_seq);
 }
 

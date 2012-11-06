@@ -10,9 +10,11 @@ ENTRY(_start)
 SECTIONS
 {
 	. = 0;
+	/* 부트섹터 코드 */
 	.bstext		: { *(.bstext) }
 	.bsdata		: { *(.bsdata) }
 
+	/* 부트 프로토콜 헤더 */
 	. = 497;
 	.header		: { *(.header) }
 	.entrytext	: { *(.entrytext) }
@@ -20,6 +22,7 @@ SECTIONS
 	.initdata	: { *(.initdata) }
 	__end_init = .;
 
+	/* 부트 프로토콜 정보 끝에는 setup 코드 */
 	.text		: { *(.text) }
 	.text32		: { *(.text32) }
 

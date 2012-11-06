@@ -52,11 +52,10 @@ EXPORT_SYMBOL(pci_mem_start);
  * This function checks if any part of the range <start,end> is mapped
  * with type.
  */
-int
-e820_any_mapped(u64 start, u64 end, unsigned type)
+int e820_any_mapped(u64 start, u64 end, unsigned type)
 {
 	int i;
-
+	/**< e820맵을 이잡듯이 뒤지면서 그 공간이 type에 속하면 1 */
 	for (i = 0; i < e820.nr_map; i++) {
 		struct e820entry *ei = &e820.map[i];
 
@@ -64,6 +63,10 @@ e820_any_mapped(u64 start, u64 end, unsigned type)
 			continue;
 		if (ei->addr >= end || ei->addr + ei->size <= start)
 			continue;
+		/* ei->addr < end && ei->end > start
+		 * e820맵의 블럭이 인자로 넘어온 블럭과 일부가 겹치고
+		 * type이 동일하면 참을 리턴
+		 */
 		return 1;
 	}
 	return 0;
@@ -82,15 +85,19 @@ int __init e820_all_mapped(u64 start, u64 end, unsigned type)
 
 	for (i = 0; i < e820.nr_map; i++) {
 		struct e820entry *ei = &e820.map[i];
-
+		/* 찾는 타입만 검사 */
 		if (type && ei->type != type)
 			continue;
 		/* is the region (part) in overlap with the current region ?*/
+		/* 겹치지 않으면 패스 */
 		if (ei->addr >= end || ei->addr + ei->size <= start)
 			continue;
 
 		/* if the region is at the beginning of <start,end> we move
 		 * start to the end of the region since it's ok until there
+		 */
+		/* 조금이라도 빈 공간이 생기면 이 조건에 부합되지 않는다.
+		 * 연속적으로 같은 타입의 e820블럭이 start-end 블럭을 포함해야 한다.
 		 */
 		if (ei->addr <= start)
 			start = ei->addr + ei->size;
@@ -99,13 +106,16 @@ int __init e820_all_mapped(u64 start, u64 end, unsigned type)
 		 * coverage
 		 */
 		if (start >= end)
-			return 1;
+			return 1; /* 완전하게 겹쳐야 한다. */
 	}
-	return 0;
+	return 0;		/* 부분적으로 겹치거나 안 겹치면 0 */
 }
 
 /*
  * Add a memory region to the kernel e820 map.
+ */
+/* e820은 system상의 메모리의 사용가능, 예약, 사용불가등의 타입을 가지며
+ * start는 물리주소다.
  */
 static void __init __e820_add_region(struct e820map *e820x, u64 start, u64 size,
 					 int type)
@@ -118,7 +128,7 @@ static void __init __e820_add_region(struct e820map *e820x, u64 start, u64 size,
 		       (unsigned long long) (start + size - 1));
 		return;
 	}
-
+	/* e820 맵(엔트리 모음) 끝에 하나를 추가한다. */
 	e820x->map[x].addr = start;
 	e820x->map[x].size = size;
 	e820x->map[x].type = type;
@@ -129,7 +139,7 @@ void __init e820_add_region(u64 start, u64 size, int type)
 {
 	__e820_add_region(&e820, start, size, type);
 }
-
+/* e820 타입을 출력 */
 static void __init e820_print_type(u32 type)
 {
 	switch (type) {
@@ -158,7 +168,7 @@ static void __init e820_print_type(u32 type)
 void __init e820_print_map(char *who)
 {
 	int i;
-
+	/* e820맵을 출력 : dmesg 참조 */
 	for (i = 0; i < e820.nr_map; i++) {
 		printk(KERN_INFO "%s: [mem %#018Lx-%#018Lx] ", who,
 		       (unsigned long long) e820.map[i].addr,
@@ -214,7 +224,7 @@ void __init e820_print_map(char *who)
  *	   _________________4______
  *
  *	Sanitized equivalent (no overlap):
- *	   1_______________________
+ *	   _______________________
  *	   _44_____________________
  *	   ___1____________________
  *	   ____22__________________
@@ -252,6 +262,20 @@ static int __init cpcompare(const void *a, const void *b)
 	return (ap->addr != ap->pbios->addr) - (bp->addr != bp->pbios->addr);
 }
 
+/* 위 그림에서 한줄(행)은 각각의 e820 entry
+ * 열은 메모리 주소, 값은 entry의 type이다.
+ * sanitize뒤 두번째 그림은 e820 entry들이 겹치지 않는다.
+ *
+ * 시작주소와 시작주소+크기가 반복되는 2배 배열(change_point)을 만든다.
+ * 이를 정렬하면 겹치는 블럭들을 쪼개는 것과 같은 효과를 얻는다.
+ * 정렬하고 만약 같다면 시작주소가 시작주소+크기의 앞에 오게한다.
+ * 
+ * 값이 시작주소라면 overlap_list에 넣고 시작주소+크기라면 리스트에서 뺀다.
+ * overlap_list에 여러개가 들어간다면 이 구역에서 중첩이 일어났다는 것이다.
+ * 그 구역에서 가장 높은 type 값으로 결정한다.
+ * 정상이면 0 리턴
+ */
+
 int __init sanitize_e820_map(struct e820entry *biosmap, int max_nr_map,
 			     u32 *pnr_map)
 {
@@ -271,10 +295,11 @@ int __init sanitize_e820_map(struct e820entry *biosmap, int max_nr_map,
 	if (*pnr_map < 2)
 		return -1;
 
-	old_nr = *pnr_map;
+	old_nr = *pnr_map;			/* e820 엔트리 개수 */
 	BUG_ON(old_nr > max_nr_map);
 
 	/* bail out if we find any unreasonable addresses in bios map */
+	/* 사이즈가 -일때 예외처리 */
 	for (i = 0; i < old_nr; i++)
 		if (biosmap[i].addr + biosmap[i].size < biosmap[i].addr)
 			return -1;
@@ -288,16 +313,18 @@ int __init sanitize_e820_map(struct e820entry *biosmap, int max_nr_map,
 	chgidx = 0;
 	for (i = 0; i < old_nr; i++)	{
 		if (biosmap[i].size != 0) {
-			change_point[chgidx]->addr = biosmap[i].addr;
-			change_point[chgidx++]->pbios = &biosmap[i];
-			change_point[chgidx]->addr = biosmap[i].addr +
-				biosmap[i].size;
+		  /* 원본 e820 배열을 시작주소, 시작주소+크기가 반복되는 배열로 확장한다. */
+			change_point[chgidx]->addr = biosmap[i].addr; /* e820 엔트리 값(메모리 주소) */
+			change_point[chgidx++]->pbios = &biosmap[i];  /* e820 엔트리 원본 인터 */
+			change_point[chgidx]->addr = biosmap[i].addr + biosmap[i].size; /* e820 엔트리 값 + 크기 */
 			change_point[chgidx++]->pbios = &biosmap[i];
 		}
 	}
-	chg_nr = chgidx;
+	chg_nr = chgidx; // 엔트리수 * 2
 
 	/* sort change-point list by memory addresses (low -> high) */
+  /* 이전(3.2)에서는 이중루프를 사용하여 소팅하였지만,
+   * 현재(3.7-rc4)에서는 sort로 간단히 처리. */
 	sort(change_point, chg_nr, sizeof *change_point, cpcompare, NULL);
 
 	/* create a new bios memory map, removing overlaps */
@@ -309,6 +336,9 @@ int __init sanitize_e820_map(struct e820entry *biosmap, int max_nr_map,
 	/* loop through change-points, determining affect on the new bios map */
 	for (chgidx = 0; chgidx < chg_nr; chgidx++) {
 		/* keep track of all overlapping bios entries */
+	 /* 시작주소인가? 그렇다면 overlap_list에 넣는다
+	 * overlap_list에 많이 쌓인다는 것은 주소가 많이 겹치는 것을 의미한다
+	 */
 		if (change_point[chgidx]->addr ==
 		    change_point[chgidx]->pbios->addr) {
 			/*
@@ -321,6 +351,9 @@ int __init sanitize_e820_map(struct e820entry *biosmap, int max_nr_map,
 			/*
 			 * remove entry from list (order independent,
 			 * so swap with last)
+			 */
+			/* 시작주소+크기 부분이라면 동일한 e820 엔트리의 시작주소를 overlap_list에서 제거한다.
+			 * 시작주소와 시작주소+크기는 한쌍이다. 리스트에 들어왔다가 결국 제거된다.
 			 */
 			for (i = 0; i < overlap_entries; i++) {
 				if (overlap_list[i] ==
@@ -335,6 +368,9 @@ int __init sanitize_e820_map(struct e820entry *biosmap, int max_nr_map,
 		 * "type" to use (larger value takes precedence --
 		 * 1=usable, 2,3,4,4+=unusable)
 		 */
+		/* overlap_list에서 가장 높은 값을 취한다.
+		 * 여러개의 영역이 중첩되었다면 가장 높은 type을 취한다.
+         */
 		current_type = 0;
 		for (i = 0; i < overlap_entries; i++)
 			if (overlap_list[i]->type > current_type)
@@ -343,7 +379,14 @@ int __init sanitize_e820_map(struct e820entry *biosmap, int max_nr_map,
 		 * continue building up new bios map based on this
 		 * information
 		 */
+		/* 같은 타입이라면 넘기고 같은 엔트리에 넣는다.
+		 * 기존의 e820엔트리를 처리하면서 new_bios 엔트리에 쓰는데
+		 * 두부분의 if로 나뉜다.
+		 * 첫번째 if는 크기를 넣고 엔트리를 증가시킨다.
+		 * 두번째 if는 엔트리 시작주소를 넣는다.
+		 */
 		if (current_type != last_type)	{
+		  /* 처음이거나 이상한값(0)이면 넘긴다. */
 			if (last_type != 0)	 {
 				new_bios[new_bios_entry].size =
 					change_point[chgidx]->addr - last_addr;
@@ -351,6 +394,7 @@ int __init sanitize_e820_map(struct e820entry *biosmap, int max_nr_map,
 				 * move forward only if the new size
 				 * was non-zero
 				 */
+				/* 같은값이 와서 크기가 0이 아니라면 엔트리를 증가시킨다. */
 				if (new_bios[new_bios_entry].size != 0)
 					/*
 					 * no more space left for new
@@ -359,11 +403,12 @@ int __init sanitize_e820_map(struct e820entry *biosmap, int max_nr_map,
 					if (++new_bios_entry >= max_nr_map)
 						break;
 			}
+			/* 새 엔트리 주소와 type을 넣는다.  */
 			if (current_type != 0)	{
 				new_bios[new_bios_entry].addr =
 					change_point[chgidx]->addr;
 				new_bios[new_bios_entry].type = current_type;
-				last_addr = change_point[chgidx]->addr;
+				last_addr = change_point[chgidx]->addr; /* last_addr은 계속 증가한다. */
 			}
 			last_type = current_type;
 		}
@@ -372,8 +417,9 @@ int __init sanitize_e820_map(struct e820entry *biosmap, int max_nr_map,
 	new_nr = new_bios_entry;
 
 	/* copy new bios mapping into original location */
+	/* 새로운 e820 엔트리들을 기존의 주소에 쓴다. */
 	memcpy(biosmap, new_bios, new_nr * sizeof(struct e820entry));
-	*pnr_map = new_nr;
+	*pnr_map = new_nr;			/* 엔트리 개수 */
 
 	return 0;
 }
@@ -423,17 +469,16 @@ static u64 __init __e820_update_range(struct e820map *e820x, u64 start,
 	u64 end;
 	unsigned int i;
 	u64 real_updated_size = 0;
-
+	/* 타입이 달라야한다. */
 	BUG_ON(old_type == new_type);
-
 	if (size > (ULLONG_MAX - start))
 		size = ULLONG_MAX - start;
 
-	end = start + size;
+	end = start + size;	/* end값 계산 */
 	printk(KERN_DEBUG "e820: update [mem %#010Lx-%#010Lx] ",
 	       (unsigned long long) start, (unsigned long long) (end - 1));
-	e820_print_type(old_type);
-	printk(KERN_CONT " ==> ");
+	e820_print_type(old_type); /* usable, reserved 등의 타입 출력 */
+	printk(KERN_CONT " ==> "); /* old_type ==> new_type 출력 */
 	e820_print_type(new_type);
 	printk(KERN_CONT "\n");
 
@@ -444,9 +489,10 @@ static u64 __init __e820_update_range(struct e820map *e820x, u64 start,
 
 		if (ei->type != old_type)
 			continue;
-
+		/* old type일때만 한다. */
 		ei_end = ei->addr + ei->size;
 		/* totally covered by new range? */
+		/* 변경할 엔트리가 ei 엔트리를 포함하는 경우 new type로 변경  */
 		if (ei->addr >= start && ei_end <= end) {
 			ei->type = new_type;
 			real_updated_size += ei->size;
@@ -454,6 +500,10 @@ static u64 __init __e820_update_range(struct e820map *e820x, u64 start,
 		}
 
 		/* new range is totally covered? */
+		/* 변경할 엔트리가 ei엔트리에 포함되는 경우
+		 * oldtype엔트리와 new type 엔트리를 쪼개서 원래의 ei엔트리 사이즈를 쪼개서 맨 뒤에다 
+		 * new entry, ei_end - end 사이즈 만큼의 ei를 추가해준다.
+		 */
 		if (ei->addr < start && ei_end > end) {
 			__e820_add_region(e820x, start, size, new_type);
 			__e820_add_region(e820x, end, ei_end - end, ei->type);
@@ -463,11 +513,13 @@ static u64 __init __e820_update_range(struct e820map *e820x, u64 start,
 		}
 
 		/* partially covered */
+		/* 부분적으로 겹치는 경우, 겹쳐지는 영역 선택 */
 		final_start = max(start, ei->addr);
 		final_end = min(end, ei_end);
+		/* 겹쳐지지 않는 경우는 패스 */
 		if (final_start >= final_end)
 			continue;
-
+		/* 겹치는 부분을 new type으로 등록해준다. */
 		__e820_add_region(e820x, final_start, final_end - final_start,
 				  new_type);
 
@@ -477,12 +529,15 @@ static u64 __init __e820_update_range(struct e820map *e820x, u64 start,
 		 * left range could be head or tail, so need to update
 		 * size at first.
 		 */
+		/* old type의 겹치지 않는 영역의 사이즈 조절 */
 		ei->size -= final_end - final_start;
+		/* ei 엔트리 = head, size값만 변경 */
 		if (ei->addr < final_start)
 			continue;
+		/* ei 엔트리 = tail, 시작주소 값도 변경 */
 		ei->addr = final_end;
 	}
-	return real_updated_size;
+	return real_updated_size; /* 실제로 변경된 값 */
 }
 
 u64 __init e820_update_range(u64 start, u64 size, unsigned old_type,
@@ -520,12 +575,13 @@ u64 __init e820_remove_range(u64 start, u64 size, unsigned old_type,
 		struct e820entry *ei = &e820.map[i];
 		u64 final_start, final_end;
 		u64 ei_end;
-
+		/* RAM타입인지 아닌지 체크*/
 		if (checktype && ei->type != old_type)
 			continue;
 
 		ei_end = ei->addr + ei->size;
 		/* totally covered? */
+		/* 검색중인 블럭이 더 작으면 지워버린다.  */
 		if (ei->addr >= start && ei_end <= end) {
 			real_removed_size += ei->size;
 			memset(ei, 0, sizeof(struct e820entry));
@@ -533,6 +589,9 @@ u64 __init e820_remove_range(u64 start, u64 size, unsigned old_type,
 		}
 
 		/* new range is totally covered? */
+		/* 검색중인 블럭이 remove할 블럭보다 더 크면 하나는 사이즈를 줄이고
+		 * 뒤쪽에는 하나를 등록해서 remove 영역은 공백으로 만든다.
+		 */
 		if (ei->addr < start && ei_end > end) {
 			e820_add_region(end, ei_end - end, ei->type);
 			ei->size = start - ei->addr;
@@ -564,16 +623,17 @@ void __init update_e820(void)
 	u32 nr_map;
 
 	nr_map = e820.nr_map;
+	/* sanitize 결과 에러나면 리턴 */
 	if (sanitize_e820_map(e820.map, ARRAY_SIZE(e820.map), &nr_map))
 		return;
 	e820.nr_map = nr_map;
 	printk(KERN_INFO "e820: modified physical RAM map:\n");
-	e820_print_map("modified");
+	e820_print_map("modified"); /* 수정되었다고 표시 */
 }
 static void __init update_e820_saved(void)
 {
 	u32 nr_map;
-
+	/* update 되었으니 sanitize 한다. */
 	nr_map = e820_saved.nr_map;
 	if (sanitize_e820_map(e820_saved.map, ARRAY_SIZE(e820_saved.map), &nr_map))
 		return;
@@ -731,6 +791,9 @@ u64 __init early_reserve_e820(u64 size, u64 align)
 {
 	u64 addr;
 
+  /* 이전(3.2)에서는 size크기만큼 start에서 증가하며, 영역을
+   * 찾아다녔지만, 현재(3.7-rc4)는 바로 alloc함수 호출.
+   */
 	addr = __memblock_alloc_base(size, align, MEMBLOCK_ALLOC_ACCESSIBLE);
 	if (addr) {
 		e820_update_range_saved(addr, size, E820_RAM, E820_RESERVED);
@@ -754,6 +817,7 @@ u64 __init early_reserve_e820(u64 size, u64 align)
 /*
  * Find the highest page frame number we have available
  */
+/* 특정 타입의 e820 max값 혹은 아키텍쳐 limit를 구한다. */
 static unsigned long __init e820_end_pfn(unsigned long limit_pfn, unsigned type)
 {
 	int i;
@@ -767,32 +831,41 @@ static unsigned long __init e820_end_pfn(unsigned long limit_pfn, unsigned type)
 
 		if (ei->type != type)
 			continue;
-
+		/* 시작 페이지 넘버와 끝 페이지 넘버를 구한다. */
 		start_pfn = ei->addr >> PAGE_SHIFT;
 		end_pfn = (ei->addr + ei->size) >> PAGE_SHIFT;
 
+		/* 64비트에서는 limit는 1 << 34 */
+		/* 한계를 넘어서면 무시한다. */
 		if (start_pfn >= limit_pfn)
 			continue;
+		/* limit를 넘어서는 부분 역시 무시. limit로 설정후 루프를 끝낸다. */
 		if (end_pfn > limit_pfn) {
 			last_pfn = limit_pfn;
 			break;
 		}
+		/* 최상위값 갱신 */
 		if (end_pfn > last_pfn)
 			last_pfn = end_pfn;
 	}
-
+	/* 아키텍쳐의 최대값을 넘어서는지 체크 */
 	if (last_pfn > max_arch_pfn)
 		last_pfn = max_arch_pfn;
-
+  
+	/* max page frame number 출력 */
 	printk(KERN_INFO "e820: last_pfn = %#lx max_arch_pfn = %#lx\n",
 			 last_pfn, max_arch_pfn);
 	return last_pfn;
 }
+/* 가용 e820의 최대 페이지 넘버 값을 구한다. MAX는 아키텍쳐값 */
 unsigned long __init e820_end_of_ram_pfn(void)
 {
 	return e820_end_pfn(MAX_ARCH_PFN, E820_RAM);
 }
 
+/* 4G이하에서 e820 map의 최대 페이지 넘버를 구한다.
+ * 첫번째 인자(limit) 안에서 사용가능(RAM)한 끝을 구한다.
+ */
 unsigned long __init e820_end_of_low_ram_pfn(void)
 {
 	return e820_end_pfn(1UL<<(32 - PAGE_SHIFT), E820_RAM);
@@ -814,6 +887,9 @@ static int __init parse_memopt(char *p)
 	if (!p)
 		return -EINVAL;
 
+	/* 32비트면 nopentium 옵션이 오면 PSE 비트를 끈다. 컴퓨터 < 586
+	 * 64비트는 no pentium이 있을수 없기에 무시된다.
+	 */
 	if (!strcmp(p, "nopentium")) {
 #ifdef CONFIG_X86_32
 		setup_clear_cpu_cap(X86_FEATURE_PSE);
@@ -833,6 +909,7 @@ static int __init parse_memopt(char *p)
 
 	return 0;
 }
+/* early_param으로 등록해준다. */
 early_param("mem", parse_memopt);
 
 static int __init parse_memmap_opt(char *p)
@@ -881,6 +958,8 @@ early_param("memmap", parse_memmap_opt);
 
 void __init finish_e820_parsing(void)
 {
+	/* 유저가 정의한 mem=이나 memmap= 옵션으로 메모리에 변동사항이 생기면
+	 * userdef가 1이 e820 맵의 변동사항에 대한 sanitize를 한번 더 한다. */
 	if (userdef) {
 		u32 nr = e820.nr_map;
 
@@ -1014,15 +1093,20 @@ char *__init default_machine_specific_memory_setup(void)
 	 * Otherwise fake a memory map; one section from 0k->640k,
 	 * the next section from 1mb->appropriate_mem_k
 	 */
-	new_nr = boot_params.e820_entries;
+	new_nr = boot_params.e820_entries; /* 엔트리 개수 */
+	/* e820 memory map의 겹치는 부분을 쪼개서 새로운 e820 map 을 생성하고 원래의 
+	*  e820 map의 위치에 복사해놓는다. entry 의 type 은 높은 놈으로 들어가며
+	*  entry 갯수는 늘어날 것이다.
+	*/
 	sanitize_e820_map(boot_params.e820_map,
 			ARRAY_SIZE(boot_params.e820_map),
 			&new_nr);
-	boot_params.e820_entries = new_nr;
+	boot_params.e820_entries = new_nr; /* 엔트리 개수 */
+	/* sanitize한 e820 memory map을 복사한다. */
 	if (append_e820_map(boot_params.e820_map, boot_params.e820_entries)
 	  < 0) {
 		u64 mem_size;
-
+		/* e820을 구할수 없으면 88이나 e801 인터럽트로 메모리 방법을 구해 넣어준다. */
 		/* compare results from other methods and take the greater */
 		if (boot_params.alt_mem_k
 		    < boot_params.screen_info.ext_mem_k) {
@@ -1034,24 +1118,26 @@ char *__init default_machine_specific_memory_setup(void)
 		}
 
 		e820.nr_map = 0;
-		e820_add_region(0, LOWMEMSIZE(), E820_RAM);
-		e820_add_region(HIGH_MEMORY, mem_size << 10, E820_RAM);
+		e820_add_region(0, LOWMEMSIZE(), E820_RAM); /* e820을 구하지 못하면 직접 e820 메모리 영역을 정해준다. 636K 기본메모리(<1M) 영역 */
+		e820_add_region(HIGH_MEMORY, mem_size << 10, E820_RAM); /* 1M부터 메모리 용량 (1M단위) 타입은 available (E820_RAM=1) */
 	}
 
 	/* In case someone cares... */
-	return who;
+	return who;					/* 메모리 구하는 방법 스트링 포엔터 ("BIOS-...") */
 }
 
 void __init setup_memory_map(void)
 {
 	char *who;
 
+	/*	memory_setup는 default_machine_specific_memory_setup 함수 포인터다. */
 	who = x86_init.resources.memory_setup();
 	memcpy(&e820_saved, &e820, sizeof(struct e820map));
-	printk(KERN_INFO "e820: BIOS-provided physical RAM map:\n");
+	printk(KERN_INFO "e820: BIOS-provided physical RAM map:\n"); /* dmesg 초반부의 e820 맵 출력 */
 	e820_print_map(who);
 }
 
+/* e820 맵에서 예약된 영역만 memblock.memory에 더한다. */
 void __init memblock_x86_fill(void)
 {
 	int i;
@@ -1064,25 +1150,28 @@ void __init memblock_x86_fill(void)
 	 */
 	memblock_allow_resize();
 
+	/* e820 엔트리를 모두 찾는다. e820에서 특정 영역을 memblock에 추가한다.  */
 	for (i = 0; i < e820.nr_map; i++) {
 		struct e820entry *ei = &e820.map[i];
 
 		end = ei->addr + ei->size;
-		if (end != (resource_size_t)end)
+		if (end != (resource_size_t)end) /* 크기에 따른 값이 같지 않으면 패스 */
 			continue;
-
+		/* 사용가능 혹은 커널이 예약중인 영역만 체크 */
 		if (ei->type != E820_RAM && ei->type != E820_RESERVED_KERN)
 			continue;
-
+		/* 위에 해당하면 add */
 		memblock_add(ei->addr, ei->size);
 	}
 
 	/* throw away partial pages */
 	memblock_trim_memory(PAGE_SIZE);
 
+	memblock_analyze();
+	/* memblock 출력 */
 	memblock_dump_all();
 }
-
+/* 0~16M(ISA DMA) 영역중 예약된 크기를 구한다. */
 void __init memblock_find_dma_reserve(void)
 {
 #ifdef CONFIG_X86_64

@@ -17,12 +17,13 @@
 #include <asm/proto.h>
 #include <asm/dma.h>		/* for MAX_DMA_PFN */
 
+/* 페이징할때 할당할 페이지 번호 */
 unsigned long __initdata pgt_buf_start;
 unsigned long __meminitdata pgt_buf_end;
 unsigned long __meminitdata pgt_buf_top;
 
 int after_bootmem;
-
+/* 꼼수스럽다. */
 int direct_gbpages
 #ifdef CONFIG_DIRECT_GBPAGES
 				= 1
@@ -40,6 +41,7 @@ struct map_range {
  * mr[0].start to mr[nr_range - 1].end, while accounting for possible 2M and 1GB
  * pages. Then find enough contiguous space for those page tables.
  */
+/* 커널 매핑에 필요한 테이블을 pgt_... 변수들에 할당 */
 static void __init find_early_table_space(struct map_range *mr, int nr_range)
 {
 	int i;
@@ -51,6 +53,7 @@ static void __init find_early_table_space(struct map_range *mr, int nr_range)
 		unsigned long range, extra;
 
 		range = mr[i].end - mr[i].start;
+    /* 올림한 PUD 갯수 */
 		puds += (range + PUD_SIZE - 1) >> PUD_SHIFT;
 
 		if (mr[i].page_size_mask & (1 << PG_LEVEL_1G)) {
@@ -65,6 +68,7 @@ static void __init find_early_table_space(struct map_range *mr, int nr_range)
 #ifdef CONFIG_X86_32
 			extra += PMD_SIZE;
 #endif
+		/* 올림한 pte 총값 */
 			ptes += (extra + PAGE_SIZE - 1) >> PAGE_SHIFT;
 		} else {
 			ptes += (range + PAGE_SIZE - 1) >> PAGE_SHIFT;
@@ -73,18 +77,23 @@ static void __init find_early_table_space(struct map_range *mr, int nr_range)
 
 	tables = roundup(puds * sizeof(pud_t), PAGE_SIZE);
 	tables += roundup(pmds * sizeof(pmd_t), PAGE_SIZE);
+	/* 테이블은 페이지를 할당할 메모리 공간이다. 계속 더해준다 */
 	tables += roundup(ptes * sizeof(pte_t), PAGE_SIZE);
 
 #ifdef CONFIG_X86_32
 	/* for fixmap */
+	/* 32비트는 fixed address를 위한 영역도 할당 */
 	tables += roundup(__end_of_fixed_addresses * sizeof(pte_t), PAGE_SIZE);
 #endif
 	good_end = max_pfn_mapped << PAGE_SHIFT;
-
+	/* 커널 영역(0~max_pfn_mapped) 중 할당할 tables 크기만큼 할당 */
 	base = memblock_find_in_range(start, good_end, tables, PAGE_SIZE);
 	if (!base)
 		panic("Cannot find space for the kernel page tables");
-
+	/* 전역변수에 주소를 대입
+	 * 이 주소들은 테이블을 할당할 페이지 번호다.
+	 * start부터 end 까지는 사용한 값, top은 최대 (제한된) 테이블 크기.
+	 */
 	pgt_buf_start = base >> PAGE_SHIFT;
 	pgt_buf_end = pgt_buf_start;
 	pgt_buf_top = pgt_buf_start + (tables >> PAGE_SHIFT);
@@ -104,7 +113,7 @@ void __init native_pagetable_reserve(u64 start, u64 end)
 #else /* CONFIG_X86_64 */
 #define NR_RANGE_MR 5
 #endif
-
+/* mr블록에 인자로 들어온 값을 등록한다. */
 static int __meminit save_mr(struct map_range *mr, int nr_range,
 			     unsigned long start_pfn, unsigned long end_pfn,
 			     unsigned long page_size_mask)
@@ -126,6 +135,10 @@ static int __meminit save_mr(struct map_range *mr, int nr_range,
  * This runs before bootmem is initialized and gets pages directly from
  * the physical memory. To access them they are temporarily mapped.
  */
+/* 64비트는 5번 메모리를 쪼갠다.
+ * 처음 2M와 두번째 1G로 올림 해서 쪼개본다. start가 0이 오면 패스되는데
+ * 세번째는 GB단위로 end까지 쪼갠다. 그다음에 2MB와 4KB단위로 쪼갠다.
+ */
 unsigned long __init_refok init_memory_mapping(unsigned long start,
 					       unsigned long end)
 {
@@ -138,6 +151,7 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
 	int nr_range, i;
 	int use_pse, use_gbpages;
 
+	/* 출력 */
 	printk(KERN_INFO "init_memory_mapping: [mem %#010lx-%#010lx]\n",
 	       start, end - 1);
 
@@ -154,26 +168,31 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
 #endif
 
 	/* Enable PSE if available */
+	/* PSE가 가능하면 on */
 	if (cpu_has_pse)
 		set_in_cr4(X86_CR4_PSE);
 
 	/* Enable PGE if available */
+	/* CPU가 PGE를 지원하면 켜주고 mask해도 켤수있게 한다.  */
 	if (cpu_has_pge) {
 		set_in_cr4(X86_CR4_PGE);
 		__supported_pte_mask |= _PAGE_GLOBAL;
 	}
-
+	/* 지원하면 해당번째(enum) 비트를 켠다. */
+	/* 테이블 엔트리의 PAE비트가 1이면 1G
+	 * 0일때 PSE가 0이면 4KB, 1이면 2M 페이징이다
+	 */
 	if (use_gbpages)
 		page_size_mask |= 1 << PG_LEVEL_1G;
 	if (use_pse)
 		page_size_mask |= 1 << PG_LEVEL_2M;
-
+	/* map_range를 0으로 초기화 */
 	memset(mr, 0, sizeof(mr));
 	nr_range = 0;
 
 	/* head if not big page alignment ? */
-	start_pfn = start >> PAGE_SHIFT;
-	pos = start_pfn << PAGE_SHIFT;
+	start_pfn = start >> PAGE_SHIFT; /* 시작 페이지 프레임 */
+	pos = start_pfn << PAGE_SHIFT;	 /* 페이지 단위로 버림된 오프셋 */
 #ifdef CONFIG_X86_32
 	/*
 	 * Don't use a large page for the first 2/4MB of memory
@@ -181,30 +200,47 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
 	 * and overlapping MTRRs into large pages can cause
 	 * slowdowns.
 	 */
-	if (pos == 0)
+	if (pos == 0)		/* 32비트면 0이어도 end_pfn는 1이다. */
 		end_pfn = 1<<(PMD_SHIFT - PAGE_SHIFT);
 	else
 		end_pfn = ((pos + (PMD_SIZE - 1))>>PMD_SHIFT)
 				 << (PMD_SHIFT - PAGE_SHIFT);
 #else /* CONFIG_X86_64 */
+	/* PMD로 올림후 페이지 번호 구함
+	 * PMD단위(512개의 PTE엔트리)로 페이지 갯수를 구한다
+	 */
 	end_pfn = ((pos + (PMD_SIZE - 1)) >> PMD_SHIFT)
-			<< (PMD_SHIFT - PAGE_SHIFT);
+		<< (PMD_SHIFT - PAGE_SHIFT); /*21-12=9*/
 #endif
+	/* PMD 한블럭보다 작으면 작은 값을 취하고
+	 * 한블럭이 넘으면 PMD 한 블럭씩 처리한다.
+	 */
 	if (end_pfn > (end >> PAGE_SHIFT))
 		end_pfn = end >> PAGE_SHIFT;
+	/* 아래는 정상적인 경우 save_mr을 실행
+	 * 0이면 서로 같기때문에 save_mr이 실행되지 않는다.
+	 */
 	if (start_pfn < end_pfn) {
 		nr_range = save_mr(mr, nr_range, start_pfn, end_pfn, 0);
 		pos = end_pfn << PAGE_SHIFT;
 	}
 
 	/* big page (2M) range */
+	/* 0이 들어왔다면 또 0, 아니면 위에서 끝난값 */
 	start_pfn = ((pos + (PMD_SIZE - 1))>>PMD_SHIFT)
 			 << (PMD_SHIFT - PAGE_SHIFT);
 #ifdef CONFIG_X86_32
+	/* end의 페이지 넘버
+	 * 32비트는 2MB 단위 하지만 64비트는 1GB 단위
+	 */
 	end_pfn = (end>>PMD_SHIFT) << (PMD_SHIFT - PAGE_SHIFT);
 #else /* CONFIG_X86_64 */
+	/* PUD단위(1G)로 올림한 페이지 넘버를 구한다.
+	 * start값이 0이라면 여기서도 실행되지 않는다
+	 */
 	end_pfn = ((pos + (PUD_SIZE - 1))>>PUD_SHIFT)
 			 << (PUD_SHIFT - PAGE_SHIFT);
+	/* 마지막 블럭이면 작은값 */
 	if (end_pfn > ((end>>PMD_SHIFT)<<(PMD_SHIFT - PAGE_SHIFT)))
 		end_pfn = ((end>>PMD_SHIFT)<<(PMD_SHIFT - PAGE_SHIFT));
 #endif
@@ -214,7 +250,7 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
 				page_size_mask & (1<<PG_LEVEL_2M));
 		pos = end_pfn << PAGE_SHIFT;
 	}
-
+	/* 0으로 들어와도 GB(PUD)단위로 쪼개서 mr 배열에 넣는다. */
 #ifdef CONFIG_X86_64
 	/* big page (1G) range */
 	start_pfn = ((pos + (PUD_SIZE - 1))>>PUD_SHIFT)
@@ -224,39 +260,44 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
 		nr_range = save_mr(mr, nr_range, start_pfn, end_pfn,
 				page_size_mask &
 				 ((1<<PG_LEVEL_2M)|(1<<PG_LEVEL_1G)));
-		pos = end_pfn << PAGE_SHIFT;
+		pos = end_pfn << PAGE_SHIFT; /* GB단위의 마지막값 */
 	}
 
 	/* tail is not big page (1G) alignment */
+	/* 1GB로 짤리지 못한 메모리를 PMD(2M)값으로 쪼갠다. */
 	start_pfn = ((pos + (PMD_SIZE - 1))>>PMD_SHIFT)
 			 << (PMD_SHIFT - PAGE_SHIFT);
 	end_pfn = (end >> PMD_SHIFT) << (PMD_SHIFT - PAGE_SHIFT);
 	if (start_pfn < end_pfn) {
 		nr_range = save_mr(mr, nr_range, start_pfn, end_pfn,
 				page_size_mask & (1<<PG_LEVEL_2M));
-		pos = end_pfn << PAGE_SHIFT;
+		pos = end_pfn << PAGE_SHIFT; /* 역시 2MB 단위의 마지막값 */
 	}
 #endif
 
 	/* tail is not big page (2M) alignment */
+	/* 2M으로 짤리지 못한 값을 Page 크기 값으로 쪼갠다. */
 	start_pfn = pos>>PAGE_SHIFT;
 	end_pfn = end>>PAGE_SHIFT;
 	nr_range = save_mr(mr, nr_range, start_pfn, end_pfn, 0);
 
 	/* try to merge same page size and continuous */
+	/* 배열이 2개 이상일때 이어지는 주소를 합친다. */
 	for (i = 0; nr_range > 1 && i < nr_range - 1; i++) {
 		unsigned long old_start;
 		if (mr[i].end != mr[i+1].start ||
 		    mr[i].page_size_mask != mr[i+1].page_size_mask)
 			continue;
+		/* i와 end 다음 start가 이어지고 page_size가 동일하면 아래 코드를 실행 */
 		/* move it */
 		old_start = mr[i].start;
+		/* 메모리를 복사 */
 		memmove(&mr[i], &mr[i+1],
 			(nr_range - 1 - i) * sizeof(struct map_range));
-		mr[i--].start = old_start;
-		nr_range--;
+		mr[i--].start = old_start; /* start값을 이전값으로 해서 merge한다. */
+		nr_range--;		   /* count는 감소 */
 	}
-
+	/* 갯수 페이지 레벨 별로 프린트 */
 	for (i = 0; i < nr_range; i++)
 		printk(KERN_DEBUG " [mem %#010lx-%#010lx] page %s\n",
 				mr[i].start, mr[i].end - 1,
@@ -270,8 +311,9 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
 	 * memory mapped. Unfortunately this is done currently before the
 	 * nodes are discovered.
 	 */
+	/* 초기화되지 않았으면 실행된다. */
 	if (!after_bootmem)
-		find_early_table_space(mr, nr_range);
+		find_early_table_space(mr, nr_range); /* 커널 메모리 테이블 주소 할당 */
 
 	for (i = 0; i < nr_range; i++)
 		ret = kernel_physical_mapping_init(mr[i].start, mr[i].end,
@@ -300,10 +342,13 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
 	 * RO all the pagetable pages, including the ones that are beyond
 	 * pgt_buf_end at that time.
 	 */
+	/* 처음이고 end가 start보다 작은 정상 상태이면 */
 	if (!after_bootmem && pgt_buf_end > pgt_buf_start)
+		/* "PGTABLE" 로 table로 사용한 영역을 예약한다. */
 		x86_init.mapping.pagetable_reserve(PFN_PHYS(pgt_buf_start),
 				PFN_PHYS(pgt_buf_end));
 
+	/* 처음이라면 메모리 테스트를 한다. */
 	if (!after_bootmem)
 		early_memtest(start, end);
 

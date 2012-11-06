@@ -11,6 +11,7 @@
 #include <linux/bitmap.h>
 #include <linux/bug.h>
 
+/* bits[nr_cpus] : bits라는 멤버로 최대 cpu수만큼 배열 생성 */
 typedef struct cpumask { DECLARE_BITMAP(bits, NR_CPUS); } cpumask_t;
 
 /**
@@ -22,6 +23,7 @@ typedef struct cpumask { DECLARE_BITMAP(bits, NR_CPUS); } cpumask_t;
  */
 #define cpumask_bits(maskp) ((maskp)->bits)
 
+/* 최대 cpu 개수 = CONFIG_NR_CPUS로 조절가능 */
 #if NR_CPUS == 1
 #define nr_cpu_ids		1
 #else
@@ -105,6 +107,7 @@ extern const struct cpumask *const cpu_active_mask;
 static inline unsigned int cpumask_check(unsigned int cpu)
 {
 #ifdef CONFIG_DEBUG_PER_CPU_MAPS
+	/* MAX cpu값보다 현재 구하려는 cpu값이 크면 한번만 경고 */
 	WARN_ON_ONCE(cpu >= nr_cpumask_bits);
 #endif /* CONFIG_DEBUG_PER_CPU_MAPS */
 	return cpu;
@@ -254,6 +257,7 @@ int cpumask_any_but(const struct cpumask *mask, unsigned int cpu);
  */
 static inline void cpumask_set_cpu(unsigned int cpu, struct cpumask *dstp)
 {
+	/* 비트 배열 포인터(*dstp)에서 cpu에 해당하는 비트를 1로 셋 */
 	set_bit(cpumask_check(cpu), cpumask_bits(dstp));
 }
 

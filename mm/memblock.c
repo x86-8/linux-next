@@ -104,9 +104,11 @@ phys_addr_t __init_memblock memblock_find_in_range_node(phys_addr_t start,
 
 	/* pump up @end */
 	if (end == MEMBLOCK_ALLOC_ACCESSIBLE)
-		end = memblock.current_limit;
+		end = memblock.current_limit; /* 한계는 64비트 끝 */
 
 	/* avoid allocating the first page */
+	/* 이전(3.2)에서는 뒤쪽부터 할당가능한 memblock을 검색하여 찾았으나,
+   * 현재(3.7-rc4)에서는 단순히 max_t로 찾는다 */
 	start = max_t(phys_addr_t, start, PAGE_SIZE);
 	end = max(start, end);
 
@@ -143,7 +145,10 @@ phys_addr_t __init_memblock memblock_find_in_range(phys_addr_t start,
 	return memblock_find_in_range_node(start, end, size, align,
 					   MAX_NUMNODES);
 }
-
+/* r값을 삭제하고 뒤에있는걸 하나씩 앞당긴다
+ * 카운트 감소
+ * 0이면 초기화한다.
+ */
 static void __init_memblock memblock_remove_region(struct memblock_type *type, unsigned long r)
 {
 	type->total_size -= type->regions[r].size;
@@ -188,6 +193,7 @@ phys_addr_t __init_memblock get_allocated_memblock_reserved_regions_info(
  * RETURNS:
  * 0 on success, -1 on failure.
  */
+/* memblock을 더할때 max를 초과하면 두배로 확장한다 */
 static int __init_memblock memblock_double_array(struct memblock_type *type,
 						phys_addr_t new_area_start,
 						phys_addr_t new_area_size)
@@ -201,12 +207,13 @@ static int __init_memblock memblock_double_array(struct memblock_type *type,
 	/* We don't allow resizing until we know about the reserved regions
 	 * of memory that aren't suitable for allocation
 	 */
+	/* 특정 시점 이전에는 못한다. */
 	if (!memblock_can_resize)
 		return -1;
 
 	/* Calculate new doubled size */
-	old_size = type->max * sizeof(struct memblock_region);
-	new_size = old_size << 1;
+	old_size = type->max * sizeof(struct memblock_region); /* 기존의 최대값 * 구조체 크기 */
+	new_size = old_size << 1;			       /* 기존의 두배면 기쁨도 두배 사랑도 두배 */
 	/*
 	 * We need to allocated new one align to PAGE_SIZE,
 	 *   so we can free them completely later.
@@ -232,6 +239,7 @@ static int __init_memblock memblock_double_array(struct memblock_type *type,
 	 * is active for memory hotplug operations
 	 */
 	if (use_slab) {
+		/* 슬랩을 사용가능하면 메모리 할당 */
 		new_array = kmalloc(new_size, GFP_KERNEL);
 		addr = new_array ? __pa(new_array) : 0;
 	} else {
@@ -264,8 +272,8 @@ static int __init_memblock memblock_double_array(struct memblock_type *type,
 	 * reserved region since it may be our reserved array itself that is
 	 * full.
 	 */
-	memcpy(new_array, type->regions, old_size);
-	memset(new_array + type->max, 0, old_size);
+	memcpy(new_array, type->regions, old_size); /* 복사! */
+	memset(new_array + type->max, 0, old_size); /* 늘린 공간을 set */
 	old_array = type->regions;
 	type->regions = new_array;
 	type->max <<= 1;
@@ -371,6 +379,10 @@ static int __init_memblock memblock_add_region(struct memblock_type *type,
 		return 0;
 
 	/* special case for empty array */
+	/* memblock_init후 처음이면 인자로 넘어온
+	 * base와 size 입력
+	 * 앞쪽에 예외처리가 있다면 if 비교를 들어올때마다 실행하게 된다
+	 */
 	if (type->regions[0].size == 0) {
 		WARN_ON(type->cnt != 1 || type->total_size);
 		type->regions[0].base = base;
@@ -388,6 +400,7 @@ repeat:
 	base = obase;
 	nr_new = 0;
 
+	/* 뒤에서부터 for문을 돌면서 해당 위치가 있을때까지 뒤로 밀어낸다. */
 	for (i = 0; i < type->cnt; i++) {
 		struct memblock_region *rgn = &type->regions[i];
 		phys_addr_t rbase = rgn->base;
@@ -423,6 +436,7 @@ repeat:
 	 * insertions; otherwise, merge and return.
 	 */
 	if (!insert) {
+    /* 메모리 블럭이 한계치를 초과하면 두배로 확장 */
 		while (type->cnt + nr_new > type->max)
 			if (memblock_double_array(type, obase, size) < 0)
 				return -ENOMEM;
@@ -478,9 +492,12 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 		if (memblock_double_array(type, base, size) < 0)
 			return -ENOMEM;
 
+	/* Walk through the array for collisions */
+	/* 카운트만큼 재빨리 반복 */
 	for (i = 0; i < type->cnt; i++) {
 		struct memblock_region *rgn = &type->regions[i];
 		phys_addr_t rbase = rgn->base;
+		/* 이 region의 끝부분 */
 		phys_addr_t rend = rbase + rgn->size;
 
 		if (rbase >= end)
@@ -539,6 +556,7 @@ int __init_memblock memblock_remove(phys_addr_t base, phys_addr_t size)
 	return __memblock_remove(&memblock.memory, base, size);
 }
 
+/* reserved에서 해당 영역을 제거 */
 int __init_memblock memblock_free(phys_addr_t base, phys_addr_t size)
 {
 	memblock_dbg("   memblock_free: [%#016llx-%#016llx] %pF\n",
@@ -551,13 +569,16 @@ int __init_memblock memblock_free(phys_addr_t base, phys_addr_t size)
 
 int __init_memblock memblock_reserve(phys_addr_t base, phys_addr_t size)
 {
+	/* memblock.reserved 에 예약됨 표시 */
 	struct memblock_type *_rgn = &memblock.reserved;
 
 	memblock_dbg("memblock_reserve: [%#016llx-%#016llx] %pF\n",
 		     (unsigned long long)base,
 		     (unsigned long long)base + size,
 		     (void *)_RET_IP_);
-
+	/*
+	 * base부터 size만큼 사용한다고 reserved 배열에 표시한다.
+	 */
 	return memblock_add_region(_rgn, base, size, MAX_NUMNODES);
 }
 
@@ -983,6 +1004,7 @@ static void __init_memblock memblock_dump(struct memblock_type *type, char *name
 	}
 }
 
+/* memblock 정보를 출력 */
 void __init_memblock __memblock_dump_all(void)
 {
 	pr_info("MEMBLOCK configuration:\n");

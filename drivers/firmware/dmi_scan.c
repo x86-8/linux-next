@@ -20,44 +20,45 @@ static char dmi_empty_string[] = "        ";
  * Catch too early calls to dmi_check_system():
  */
 static int dmi_initialized;
-
+/* s번째 문자열 위치 리턴 */
 static const char * __init dmi_string_nosave(const struct dmi_header *dm, u8 s)
 {
 	const u8 *bp = ((u8 *) dm) + dm->length;
 
 	if (s) {
 		s--;
+		/* information 뒤의 s번째 문자열의 처음포인터 반환  */
 		while (s > 0 && *bp) {
 			bp += strlen(bp) + 1;
 			s--;
 		}
 
-		if (*bp != 0) {
+		if (*bp != 0) {	/* Null이 아니면 */
 			size_t len = strlen(bp)+1;
-			size_t cmp_len = len > 8 ? 8 : len;
+			size_t cmp_len = len > 8 ? 8 : len; /* max값은 8 */
 
 			if (!memcmp(bp, dmi_empty_string, cmp_len))
-				return dmi_empty_string;
-			return bp;
-		}
+				return dmi_empty_string; /* bp가 empty string이면 empty를 리턴  */
+			return bp;			 /* 아니면 s번째 문자열의 처음 pointer 반환 */
+		} 
 	}
 
-	return "";
+	return "";		/* s<=0 이거나 NullString 이면 empty string 반환 */
 }
 
 static char * __init dmi_string(const struct dmi_header *dm, u8 s)
 {
-	const char *bp = dmi_string_nosave(dm, s);
+	const char *bp = dmi_string_nosave(dm, s); /* s번째 문자열 포인터 */
 	char *str;
 	size_t len;
 
-	if (bp == dmi_empty_string)
+	if (bp == dmi_empty_string) /* 포인터 비교 */
 		return dmi_empty_string;
 
 	len = strlen(bp) + 1;
-	str = dmi_alloc(len);
+	str = dmi_alloc(len);	/* 메모리 할당 */
 	if (str != NULL)
-		strcpy(str, bp);
+		strcpy(str, bp); /* heap에 문자열 복사 */
 	else
 		printk(KERN_ERR "dmi_string: cannot allocate %Zu bytes.\n", len);
 
@@ -79,6 +80,7 @@ static void dmi_table(u8 *buf, int len, int num,
 	 *	Stop when we see all the items the table claimed to have
 	 *	OR we run off the end of the table (also happens)
 	 */
+	/* 최대 갯수와 크기를 넘지 않으면 계속 한다.  */
 	while ((i < num) && (data - buf + sizeof(struct dmi_header)) <= len) {
 		const struct dmi_header *dm = (const struct dmi_header *)data;
 
@@ -87,11 +89,15 @@ static void dmi_table(u8 *buf, int len, int num,
 		 *  strings) before decoding to make sure we won't run off the
 		 *  table in dmi_decode or dmi_string
 		 */
-		data += dm->length;
+		data += dm->length;	/* 가변적인 information 길이를 더한다.  */
 		while ((data - buf < len - 1) && (data[0] || data[1]))
-			data++;
+			data++;	/* 가변적인 String 길이를 모르기 
+				 * 때문에 String 끝(double Null)까지 체크
+				 * String이 없으면 length를 더하면 null terminator위치가 된다.
+				 */
 		if (data - buf < len - 1)
 			decode(dm, private_data);
+ /* 테이블을 타입별로 string을 dmi_ident 배열에 하나씩 넣는다 */
 		data += 2;
 		i++;
 	}
@@ -101,15 +107,14 @@ static u32 dmi_base;
 static u16 dmi_len;
 static u16 dmi_num;
 
-static int __init dmi_walk_early(void (*decode)(const struct dmi_header *,
-		void *))
+static int __init dmi_walk_early(void (*decode)(const struct dmi_header *, void *))
 {
+	/* buf는 dmi정보를 갖고있다. */
 	u8 *buf;
-
-	buf = dmi_ioremap(dmi_base, dmi_len);
+	buf = dmi_ioremap(dmi_base, dmi_len);	/* base를 물리주소를 가상주소로 연결  */
 	if (buf == NULL)
 		return -1;
-
+	/* 테이블 정보를 decode한다.  */
 	dmi_table(buf, dmi_len, dmi_num, decode, NULL);
 
 	add_device_randomness(buf, dmi_len);
@@ -117,7 +122,7 @@ static int __init dmi_walk_early(void (*decode)(const struct dmi_header *,
 	dmi_iounmap(buf, dmi_len);
 	return 0;
 }
-
+/* 체크섬은 스트링 다음인 [5] */
 static int __init dmi_checksum(const u8 *buf)
 {
 	u8 sum = 0;
@@ -125,11 +130,11 @@ static int __init dmi_checksum(const u8 *buf)
 
 	for (a = 0; a < 15; a++)
 		sum += buf[a];
-
+	/* 체크섬을 0에 맞춰춘다. */
 	return sum == 0;
 }
-
-static char *dmi_ident[DMI_STRING_MAX];
+/* dmi_ident는 시스템의 dmi 정보의 문자열 포인터들을 연결시킨다. */
+static char *dmi_ident[DMI_STRING_MAX];  
 static LIST_HEAD(dmi_devices);
 int dmi_available;
 
@@ -144,13 +149,14 @@ static void __init dmi_save_ident(const struct dmi_header *dm, int slot, int str
 	if (dmi_ident[slot])
 		return;
 
-	p = dmi_string(dm, d[string]);
+	p = dmi_string(dm, d[string]); /* 메모리 할당후 그 주소를 리턴 */
 	if (p == NULL)
 		return;
 
-	dmi_ident[slot] = p;
+	dmi_ident[slot] = p;	/* 할당한 문자열을 포인터에 연결 */
 }
 
+/* uuid = 독자적인 번호를 붙여주는 것 */
 static void __init dmi_save_uuid(const struct dmi_header *dm, int slot, int index)
 {
 	const u8 *d = (u8*) dm + index;
@@ -165,16 +171,18 @@ static void __init dmi_save_uuid(const struct dmi_header *dm, int slot, int inde
 		if(d[i] != 0xFF) is_00 = 0;
 	}
 
-	if (is_ff || is_00)
+	if (is_ff || is_00)	/* all ff나 all 00이면 시스템에 id가 없다. */
 		return;
-
+	/* UUID 포맷은 한바이트당 2byte string과 총 4개의 하이픈(-)으로 구성되어 있다. */
 	s = dmi_alloc(16*2+4+1);
 	if (!s)
 		return;
-
+	/*	http://www.mjmwired.net/kernel/Documentation/printk-formats.txt */
+	/* pUB는 pU[bB]는 UUID로 출력해주는 포맷이다.. */
 	sprintf(s, "%pUB", d);
+	/* 커널에서는 sprintf가 EXPORT_SYMBOL된 vsnprintf로 연결된다. */
 
-        dmi_ident[slot] = s;
+        dmi_ident[slot] = s;	/* UUID string 포인터 */
 }
 
 static void __init dmi_save_type(const struct dmi_header *dm, int slot, int index)
@@ -185,11 +193,11 @@ static void __init dmi_save_type(const struct dmi_header *dm, int slot, int inde
 	if (dmi_ident[slot])
 		return;
 
-	s = dmi_alloc(4);
+	s = dmi_alloc(4);	/* 0~127 문자열로 3자리 끝은 null */
 	if (!s)
 		return;
 
-	sprintf(s, "%u", *d & 0x7F);
+	sprintf(s, "%u", *d & 0x7F); /* 출력위한 스트링 */
 	dmi_ident[slot] = s;
 }
 
@@ -322,10 +330,12 @@ static void __init dmi_save_extended_devices(const struct dmi_header *dm)
  *	and machine entries. For 2.5 we should pull the smbus controller info
  *	out of here.
  */
+/* dmi 정보들을 dmi_ident 에 연결 */
 static void __init dmi_decode(const struct dmi_header *dm, void *dummy)
 {
 	switch(dm->type) {
 	case 0:		/* BIOS Information */
+		/* length, type, handle 이 4바이트라 4부터 시작 */
 		dmi_save_ident(dm, DMI_BIOS_VENDOR, 4);
 		dmi_save_ident(dm, DMI_BIOS_VERSION, 5);
 		dmi_save_ident(dm, DMI_BIOS_DATE, 8);
@@ -398,17 +408,20 @@ static void __init dmi_dump_ids(void)
 	print_filtered(dmi_get_system_info(DMI_BIOS_DATE));
 	printk(KERN_CONT "\n");
 }
-
+/* _DMI_ 스트링을 찾는다. 
+ * 못찾으면 1 성공적이면 0
+ */
 static int __init dmi_present(const char __iomem *p)
 {
 	u8 buf[15];
 
-	memcpy_fromio(buf, p, 15);
+	memcpy_fromio(buf, p, 15); /* 임시 버퍼로 복사 */
+	/* [14] 는 revision. [5]는 checksum  */
 	if ((memcmp(buf, "_DMI_", 5) == 0) && dmi_checksum(buf)) {
-		dmi_num = (buf[13] << 8) | buf[12];
-		dmi_len = (buf[7] << 8) | buf[6];
+		dmi_num = (buf[13] << 8) | buf[12];	/* 테이블 총 갯수  */
+		dmi_len = (buf[7] << 8) | buf[6];	/* 총 길이  */
 		dmi_base = (buf[11] << 24) | (buf[10] << 16) |
-			(buf[9] << 8) | buf[8];
+			(buf[9] << 8) | buf[8];	/* 32비트 물리 주소  */
 
 		/*
 		 * DMI version 0.0 means that the real version is taken from
@@ -427,11 +440,12 @@ static int __init dmi_present(const char __iomem *p)
 	return 1;
 }
 
+/* DMI 정보가 위치한 곳을 얻는다. */
 void __init dmi_scan_machine(void)
 {
 	char __iomem *p, *q;
 	int rc;
-
+	/* efi가 enable이면 efi에서 찾는다.  */
 	if (efi_enabled) {
 		if (efi.smbios == EFI_INVALID_TABLE_ADDR)
 			goto error;
@@ -440,6 +454,7 @@ void __init dmi_scan_machine(void)
 		 * needed during early boot.  This also means we can
 		 * iounmap the space when we're done with it.
 		 */
+		/* efi에 dmi주소가 있으면 파싱  */
 		p = dmi_ioremap(efi.smbios, 32);
 		if (p == NULL)
 			goto error;
@@ -452,16 +467,18 @@ void __init dmi_scan_machine(void)
 		}
 	}
 	else {
+	/* efi를 사용 안하면 BIOS 영역에서 찾는다. */
 		/*
 		 * no iounmap() for that ioremap(); it would be a no-op, but
 		 * it's so early in setup that sucker gets confused into doing
 		 * what it shouldn't if we actually call it.
 		 */
-		p = dmi_ioremap(0xF0000, 0x10000);
+		/* efi가 없으면 BIOS 영역에서 무식하게 찾는다. */
+		p = dmi_ioremap(0xF0000, 0x10000); /* 64KB 연결 */
 		if (p == NULL)
 			goto error;
 
-		for (q = p; q < p + 0x10000; q += 16) {
+		for (q = p; q < p + 0x10000; q += 16) { /* 16바이트씩 검색후 처리 */
 			rc = dmi_present(q);
 			if (!rc) {
 				dmi_available = 1;
@@ -481,22 +498,29 @@ void __init dmi_scan_machine(void)
  *	dmi_matches - check if dmi_system_id structure matches system DMI data
  *	@dmi: pointer to the dmi_system_id structure to check
  */
+/* 해당 dmi의 일치해야하는 정보들이 일치(match)하면 참이다.
+ * 예를 들면 VENDOR="IBM", NAME="3000" 이런식으로 모두 일치해야 한다.
+ */
 static bool dmi_matches(const struct dmi_system_id *dmi)
 {
 	int i;
 
 	WARN(!dmi_initialized, KERN_ERR "dmi check: not initialized yet.\n");
-
+	/* 배열 갯수만큼 */
 	for (i = 0; i < ARRAY_SIZE(dmi->matches); i++) {
 		int s = dmi->matches[i].slot;
+		/* 타입이 없으면 다음으로 */
 		if (s == DMI_NONE)
 			break;
+		/* 이 머신의 정보가 dmi_ident에 저장되어 있고 해당 타입의 스트링과 일치하면 패스 */
 		if (dmi_ident[s]
 		    && strstr(dmi_ident[s], dmi->matches[i].substr))
 			continue;
 		/* No match */
+		/* 하나라도 틀리면 false */
 		return false;
 	}
+	/* 모든 정보들이 일치하면 참 */
 	return true;
 }
 
@@ -504,6 +528,7 @@ static bool dmi_matches(const struct dmi_system_id *dmi)
  *	dmi_is_end_of_table - check for end-of-table marker
  *	@dmi: pointer to the dmi_system_id structure to check
  */
+/* DMI 테이블의 끝이면 참을 리턴 */
 static bool dmi_is_end_of_table(const struct dmi_system_id *dmi)
 {
 	return dmi->matches[0].slot == DMI_NONE;
@@ -522,18 +547,24 @@ static bool dmi_is_end_of_table(const struct dmi_system_id *dmi)
  *	returns non zero or we hit the end. Callback function is called for
  *	each successful match. Returns the number of matches.
  */
+/**
+ * dmi 체크후 일치하면 콜백 함수 호출
+ * 일치하는 갯수를 리턴한다.
+ */
 int dmi_check_system(const struct dmi_system_id *list)
 {
 	int count = 0;
 	const struct dmi_system_id *d;
-
+	/* 검색할 dmi 구조체의 끝까지 검색 */
 	for (d = list; !dmi_is_end_of_table(d); d++)
+		/* DMI가 일치하면 callback에 등록된 함수를 실행한다. */
 		if (dmi_matches(d)) {
 			count++;
+			/* callback pointer가 NULL이 아니면 실행된다. */
 			if (d->callback && d->callback(d))
 				break;
 		}
-
+	/* 일치하는 갯수 */
 	return count;
 }
 EXPORT_SYMBOL(dmi_check_system);
@@ -653,6 +684,7 @@ EXPORT_SYMBOL(dmi_find_device);
  *	On return, year, month and day are guaranteed to be in the
  *	range of [0,9999], [0,12] and [0,31] respectively.
  */
+/* dmi 필드에서 날짜 정보를 얻는다. */
 bool dmi_get_date(int field, int *yearp, int *monthp, int *dayp)
 {
 	int year = 0, month = 0, day = 0;
@@ -671,11 +703,13 @@ bool dmi_get_date(int field, int *yearp, int *monthp, int *dayp)
 	 * from the end.  Keep the behavior in the spirit of no
 	 * surprises.
 	 */
+	/* 년도가 가장 끝에 있기 때문에 년도 위치 탐색 */
 	y = strrchr(s, '/');
 	if (!y)
 		goto out;
 
 	y++;
+	/* 스트링을 숫자로 변환 */
 	year = simple_strtoul(y, &e, 10);
 	if (y != e && year < 100) {	/* 2-digit year */
 		year += 1900;

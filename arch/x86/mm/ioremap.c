@@ -74,6 +74,7 @@ static void __iomem *__ioremap_caller(resource_size_t phys_addr,
 
 	/* Don't allow wraparound or zero size */
 	last_addr = phys_addr + size - 1;
+	/* 마지막 주소가 시작주소보다 작거나 사이즈가 0이면 */
 	if (!size || last_addr < phys_addr)
 		return NULL;
 
@@ -87,6 +88,7 @@ static void __iomem *__ioremap_caller(resource_size_t phys_addr,
 	/*
 	 * Don't remap the low PCI/ISA area, it's always mapped..
 	 */
+	/* 16M이하 영역이면 remap하지 않는다. */
 	if (is_ISA_range(phys_addr, last_addr))
 		return (__force void __iomem *)phys_to_virt(phys_addr);
 
@@ -94,6 +96,7 @@ static void __iomem *__ioremap_caller(resource_size_t phys_addr,
 	 * Don't allow anybody to remap normal RAM that we're using..
 	 */
 	last_pfn = last_addr >> PAGE_SHIFT;
+	/* 시작주소부터 페이지 단위로 io자원에 System RAM으로 된 부분이 있는지 검사 한다. */
 	for (pfn = phys_addr >> PAGE_SHIFT; pfn <= last_pfn; pfn++) {
 		int is_ram = page_is_ram(pfn);
 
@@ -105,10 +108,11 @@ static void __iomem *__ioremap_caller(resource_size_t phys_addr,
 	/*
 	 * Mappings have to be page-aligned
 	 */
+	/* 하위 12비트와 그 윗부분을 각각 mask한다. */
 	offset = phys_addr & ~PAGE_MASK;
 	phys_addr &= PHYSICAL_PAGE_MASK;
 	size = PAGE_ALIGN(last_addr+1) - phys_addr;
-
+	/* 메모리 타입영역 할당? */
 	retval = reserve_memtype(phys_addr, (u64)phys_addr + size,
 						prot_val, &new_prot_val);
 	if (retval) {
@@ -344,19 +348,26 @@ static int __init early_ioremap_debug_setup(char *str)
 early_param("early_ioremap_debug", early_ioremap_debug_setup);
 
 static __initdata int after_paging_init;
+
+/*
+ * 1페이지 크기(512)만큼 pte 생성, 한개의 pmd 엔트리가 된다.
+ * 용도는 boot-time의 early_ioremap 용이다. (FIX_BTMAP)
+ */
 static pte_t bm_pte[PAGE_SIZE/sizeof(pte_t)] __page_aligned_bss;
 
 static inline pmd_t * __init early_ioremap_pmd(unsigned long addr)
 {
 	/* Don't assume we're using swapper_pg_dir at this point */
+	// 가상주소 영역으로 바꾼다.
+	// 따라가서 pmd 값을 구한다.
 	pgd_t *base = __va(read_cr3());
 	pgd_t *pgd = &base[pgd_index(addr)];
 	pud_t *pud = pud_offset(pgd, addr);
 	pmd_t *pmd = pmd_offset(pud, addr);
-
-	return pmd;
+	return pmd; // pmd 값(lv2) 를 구해 리턴
 }
 
+/* pte엔트리[addr의엔트리 번호] */
 static inline pte_t * __init early_ioremap_pte(unsigned long addr)
 {
 	return &bm_pte[pte_index(addr)];
@@ -367,6 +378,9 @@ bool __init is_early_ioremap_ptep(pte_t *ptep)
 	return ptep >= &bm_pte[0] && ptep < &bm_pte[PAGE_SIZE/sizeof(pte_t)];
 }
 
+/** 
+ *  slot 4개 (long) (FIX_BTMAPS_SLOTS : 64 * 4)
+ */
 static unsigned long slot_virt[FIX_BTMAPS_SLOTS] __initdata;
 
 void __init early_ioremap_init(void)
@@ -377,11 +391,21 @@ void __init early_ioremap_init(void)
 	if (early_ioremap_debug)
 		printk(KERN_INFO "early_ioremap_init()\n");
 
+	/* slot_virt  배열(4번)만큼 실행  */
 	for (i = 0; i < FIX_BTMAPS_SLOTS; i++)
+		/* 0이면 0번째 BTMAP 가상주소 1이면 64번째 페이지 가상주소.... */
 		slot_virt[i] = __fix_to_virt(FIX_BTMAP_BEGIN - NR_FIX_BTMAPS*i);
 
+	// FIX_BTMAP_BEGIN의 pmd를 구한다.
 	pmd = early_ioremap_pmd(fix_to_virt(FIX_BTMAP_BEGIN));
+
+	// boot-time ioremap용 pte 엔트리들 초기화
 	memset(bm_pte, 0, sizeof(bm_pte));
+
+	/*
+	 * early_ioremap을 위한 pmd 엔트리 하나를 대입한다. (4K(pte) * 512 = 2M)
+	 * 이제는 bm_pte가 ioremap을 위한 pte 엔트리들이다.
+	 */
 	pmd_populate_kernel(&init_mm, pmd, bm_pte);
 
 	/*
@@ -389,6 +413,7 @@ void __init early_ioremap_init(void)
 	 * we are not prepared:
 	 */
 #define __FIXADDR_TOP (-PAGE_SIZE)
+	// 시작과 끝 검사
 	BUILD_BUG_ON((__fix_to_virt(FIX_BTMAP_BEGIN) >> PMD_SHIFT)
 		     != (__fix_to_virt(FIX_BTMAP_END) >> PMD_SHIFT));
 #undef __FIXADDR_TOP
@@ -415,31 +440,35 @@ void __init early_ioremap_reset(void)
 static void __init __early_set_fixmap(enum fixed_addresses idx,
 				      phys_addr_t phys, pgprot_t flags)
 {
-	unsigned long addr = __fix_to_virt(idx);
+	unsigned long addr = __fix_to_virt(idx); /* 페이지 번호를 거꾸로 가장주소에 매핑 */
 	pte_t *pte;
 
-	if (idx >= __end_of_fixed_addresses) {
+	if (idx >= __end_of_fixed_addresses) { /* 최대값을 넘어가면 실패! */
 		BUG();
 		return;
 	}
-	pte = early_ioremap_pte(addr);
-
+	pte = early_ioremap_pte(addr); /* pte 엔트리 주소를 넣어준다. */
+	/* flags는 페이지의 속성
+	 * 속성이 있으면 세팅
+	 * 없으면 클리어
+	 */
 	if (pgprot_val(flags))
-		set_pte(pte, pfn_pte(phys >> PAGE_SHIFT, flags));
+		set_pte(pte, pfn_pte(phys >> PAGE_SHIFT, flags)); /* pte 세팅 */
 	else
 		pte_clear(&init_mm, addr, pte);
-	__flush_tlb_one(addr);
+	__flush_tlb_one(addr);		/* tlb 무효화 */
 }
 
 static inline void __init early_set_fixmap(enum fixed_addresses idx,
 					   phys_addr_t phys, pgprot_t prot)
 {
+ /* 페이징 초기화 하기 전에는 early다 */
 	if (after_paging_init)
 		__set_fixmap(idx, phys, prot);
 	else
 		__early_set_fixmap(idx, phys, prot);
 }
-
+/* clear는 해당하는 pte 엔트리의 물리주소와 prot를 0으로 set 해서 clear한다. */
 static inline void __init early_clear_fixmap(enum fixed_addresses idx)
 {
 	if (after_paging_init)
@@ -448,7 +477,7 @@ static inline void __init early_clear_fixmap(enum fixed_addresses idx)
 		__early_set_fixmap(idx, 0, __pgprot(0));
 }
 
-static void __iomem *prev_map[FIX_BTMAPS_SLOTS] __initdata;
+static void __iomem *prev_map[FIX_BTMAPS_SLOTS] __initdata; /* __iomem은 에러검사용 */
 static unsigned long prev_size[FIX_BTMAPS_SLOTS] __initdata;
 
 void __init fixup_early_ioremap(void)
@@ -486,6 +515,14 @@ static int __init check_early_ioremap_leak(void)
 }
 late_initcall(check_early_ioremap_leak);
 
+
+
+
+/* 이 함수는 물리메모리를 인자로 받아서 메모리 끝부분에 있는 가상메모리,
+ * fixed_addresses의 Boot-time map으로 할당한다.
+ * slot은 현재 4개다. 4개의 슬롯중 비어있는 슬롯으로 phys_addr을 할당한다.
+ * 리턴값은 들어온 물리주소를 매핑한 가상주소가 담긴 슬롯의 포인터이다.
+ */
 static void __init __iomem *
 __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
 {
@@ -495,11 +532,11 @@ __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
 	enum fixed_addresses idx0, idx;
 	int i, slot;
 
-	WARN_ON(system_state != SYSTEM_BOOTING);
+	WARN_ON(system_state != SYSTEM_BOOTING); /* enum으로 선언된 상태 ; 부팅중이 아니면 경고 */
 
 	slot = -1;
-	for (i = 0; i < FIX_BTMAPS_SLOTS; i++) {
-		if (!prev_map[i]) {
+	for (i = 0; i < FIX_BTMAPS_SLOTS; i++) { /* boot-time 매핑 슬롯 4개중 하나를 사용하려고 검색 */
+	  if (!prev_map[i]) {					 /* slot은 null이 아닌값을 넣는다. */
 			slot = i;
 			break;
 		}
@@ -529,15 +566,16 @@ __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
 	/*
 	 * Mappings have to be page-aligned
 	 */
-	offset = phys_addr & ~PAGE_MASK;
+	offset = phys_addr & ~PAGE_MASK; /* 4KB이하 주소만 떼낸다. */
 	phys_addr &= PAGE_MASK;
 	size = PAGE_ALIGN(last_addr + 1) - phys_addr;
+	/* page 에서 남은 bytes size = 올림정렬 last_addr - 정렬된 phys_addr */
 
 	/*
 	 * Mappings have to fit in the FIX_BTMAP area.
 	 */
-	nrpages = size >> PAGE_SHIFT;
-	if (nrpages > NR_FIX_BTMAPS) {
+	nrpages = size >> PAGE_SHIFT; /* 채워줄 페이지 갯수 */
+	if (nrpages > NR_FIX_BTMAPS) { /* 한개의 BTMAP(64)을 초과하면 안된다. */
 		WARN_ON(1);
 		return NULL;
 	}
@@ -545,22 +583,32 @@ __early_ioremap(resource_size_t phys_addr, unsigned long size, pgprot_t prot)
 	/*
 	 * Ok, go for it..
 	 */
-	idx0 = FIX_BTMAP_BEGIN - NR_FIX_BTMAPS*slot;
-	idx = idx0;
+	idx0 = FIX_BTMAP_BEGIN - NR_FIX_BTMAPS*slot; 
+/* 현재 슬롯(한슬롯은 64 페이지)의 첫 페이지 번호
+ * BEGIN에서 END는 일반적으로 생각하는 순서의 역순이다.
+ * 그래서 -연산을 한다.
+ */
+   	idx = idx0;
+	/* fixmap 공간을 pte와 매핑시킨다. fixmap은 물리적으로 연속된 공간에 할당 받는다. */
 	while (nrpages > 0) {
 		early_set_fixmap(idx, phys_addr, prot);
 		phys_addr += PAGE_SIZE;
-		--idx;
-		--nrpages;
+		--idx;				/* 페이지번호가 증가 */
+		--nrpages;			/* 페이지 갯수 감소 */
 	}
+	/* slot_virt는 슬롯의 가상주소 */
 	if (early_ioremap_debug)
 		printk(KERN_CONT "%08lx + %08lx\n", offset, slot_virt[slot]);
 
+	/* 페이징은 4KB단위라서 offset을 더해준다 */
 	prev_map[slot] = (void __iomem *)(offset + slot_virt[slot]);
 	return prev_map[slot];
 }
 
 /* Remap an IO device */
+/* 사용자가 원하는 물리공간을 fixed_addresses의 끝부분인
+ * slot(256KB 단위) 버퍼에 임시로 매핑시킨다.
+ */
 void __init __iomem *
 early_ioremap(resource_size_t phys_addr, unsigned long size)
 {
@@ -582,6 +630,7 @@ void __init early_iounmap(void __iomem *addr, unsigned long size)
 	enum fixed_addresses idx;
 	int i, slot;
 
+	/* 주소가 같은 슬롯을 찾는다 */
 	slot = -1;
 	for (i = 0; i < FIX_BTMAPS_SLOTS; i++) {
 		if (prev_map[i] == addr) {
@@ -589,7 +638,7 @@ void __init early_iounmap(void __iomem *addr, unsigned long size)
 			break;
 		}
 	}
-
+	/* 에러처리 */
 	if (slot < 0) {
 		printk(KERN_INFO "early_iounmap(%p, %08lx) not found slot\n",
 			 addr, size);
@@ -611,14 +660,15 @@ void __init early_iounmap(void __iomem *addr, unsigned long size)
 	}
 
 	virt_addr = (unsigned long)addr;
+	/* boot-map 한계를 넘으면 에러 */
 	if (virt_addr < fix_to_virt(FIX_BTMAP_BEGIN)) {
 		WARN_ON(1);
 		return;
 	}
-	offset = virt_addr & ~PAGE_MASK;
-	nrpages = PAGE_ALIGN(offset + size) >> PAGE_SHIFT;
+	offset = virt_addr & ~PAGE_MASK;		   /* 주소 */
+	nrpages = PAGE_ALIGN(offset + size) >> PAGE_SHIFT; /* 페이지 개수 */
 
-	idx = FIX_BTMAP_BEGIN - NR_FIX_BTMAPS*slot;
+	idx = FIX_BTMAP_BEGIN - NR_FIX_BTMAPS*slot; /* BEGIN에서 slot(64)만큼 뺀다 */
 	while (nrpages > 0) {
 		early_clear_fixmap(idx);
 		--idx;

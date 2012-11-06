@@ -115,6 +115,9 @@ static u8 __mtrr_type_lookup(u64 start, u64 end, u64 *partial_end, int *repeat)
 	u64 base, mask;
 	u8 prev_match, curr_match;
 
+	/* mtrr_state가 활성화 안되어 있거나, 설정(mtrr_state_set)이
+	 * 안되어 있으면 0xFF(mtrr not enabled)
+	 */
 	*repeat = 0;
 	if (!mtrr_state_set)
 		return 0xFF;
@@ -126,20 +129,21 @@ static u8 __mtrr_type_lookup(u64 start, u64 end, u64 *partial_end, int *repeat)
 	end--;
 
 	/* Look in fixed ranges. Just return the type as per start */
+	/* fixed range 안에 start가 포함되는 경우, mtrr_type 반환 */
 	if (mtrr_state.have_fixed && (start < 0x100000)) {
 		int idx;
 
 		if (start < 0x80000) {
 			idx = 0;
-			idx += (start >> 16);
+			idx += (start >> 16); /* 최대 idx < 8 */
 			return mtrr_state.fixed_ranges[idx];
 		} else if (start < 0xC0000) {
 			idx = 1 * 8;
-			idx += ((start - 0x80000) >> 14);
+			idx += ((start - 0x80000) >> 14); /* 최대 idx < 8 + 14 */
 			return mtrr_state.fixed_ranges[idx];
 		} else if (start < 0x1000000) {
 			idx = 3 * 8;
-			idx += ((start - 0xC0000) >> 12);
+			idx += ((start - 0xC0000) >> 12); /* 최대 idx < 24 + 64 */
 			return mtrr_state.fixed_ranges[idx];
 		}
 	}
@@ -149,13 +153,16 @@ static u8 __mtrr_type_lookup(u64 start, u64 end, u64 *partial_end, int *repeat)
 	 * Look of multiple ranges matching this address and pick type
 	 * as per MTRR precedence
 	 */
+	/* MTRR Enable비트가 활성화 되어 있는지 확인, Enable이 안되어
+	 * 있으면 def_type(MTRR에 저장되어 있는 default memory
+	 * type)반환. */
 	if (!(mtrr_state.enabled & 2))
 		return mtrr_state.def_type;
 
 	prev_match = 0xFF;
 	for (i = 0; i < num_var_ranges; ++i) {
 		unsigned short start_state, end_state;
-
+		/* mask_lo의 11번째 비트는 valid 비트 */
 		if (!(mtrr_state.var_ranges[i].mask_lo & (1 << 11)))
 			continue;
 
@@ -166,7 +173,9 @@ static u8 __mtrr_type_lookup(u64 start, u64 end, u64 *partial_end, int *repeat)
 
 		start_state = ((start & mask) == (base & mask));
 		end_state = ((end & mask) == (base & mask));
-
+		/* start_state와 end_state가 존재하며 서로 다른 경우,
+		 start와 end를 partial_end를 기준으로 두 부분으로
+		 나눈다. */
 		if (start_state != end_state) {
 			/*
 			 * We have start:end spanning across an MTRR.
@@ -186,15 +195,24 @@ static u8 __mtrr_type_lookup(u64 start, u64 end, u64 *partial_end, int *repeat)
 			else
 				*partial_end = base;
 
+			/* 만약 partial_end값을 구했음에도 (그럴리는
+			 없겠지만) start보다 작은 경우, 다시 값을
+			 구한다*/
 			if (unlikely(*partial_end <= start)) {
 				WARN_ON(1);
 				*partial_end = start + PAGE_SIZE;
 			}
 
 			end = *partial_end - 1; /* end is inclusive */
-			*repeat = 1;
+			/* repeat이 설정되면 start:partial_end까지
+			  찾고나서, mtrr_type_lookup(호출했던 녀석)가
+			  다시 partial_end:end까지 찾는다 */
+			*repeat = 1;		
 		}
-
+		/* 두 가지가 다를 경우는 start_state가 존재하지 않을
+		 * 경우. 
+		 * (start & mask) != (base & mask) <==> !start_state ??
+		 */
 		if ((start & mask) != (base & mask))
 			continue;
 
@@ -277,9 +295,11 @@ static void get_fixed_ranges(mtrr_type *frs)
 	int i;
 
 	k8_check_syscfg_dram_mod_en();
-
+	/* FIXED RANGE는 각각의 레지스터마다 블럭 크기가 다르다. */
 	rdmsr(MSR_MTRRfix64K_00000, p[0], p[1]);
-
+	/* 위의 1개 아래의 2, 8개 해서 총 11개의 레지스터가 있다.
+	 * 각각의 레지스터는 8비트 크기(64/8=8개)로 나뉜다.
+	 */
 	for (i = 0; i < 2; i++)
 		rdmsr(MSR_MTRRfix16K_80000 + i, p[2 + i * 2], p[3 + i * 2]);
 	for (i = 0; i < 8; i++)
@@ -342,7 +362,7 @@ static void __init print_mtrr_state(void)
 {
 	unsigned int i;
 	int high_width;
-
+	/* MTRR 기본 타입 출력과 영역 출력 */
 	pr_debug("MTRR default type: %s\n",
 		 mtrr_attrib_to_str(mtrr_state.def_type));
 	if (mtrr_state.have_fixed) {
@@ -390,17 +410,23 @@ void __init get_mtrr_state(void)
 	unsigned int i;
 
 	vrs = mtrr_state.var_ranges;
-
+	/* FIXED RANGE는 1M이하의 고정된 영역에 대한 것이다.
+	 * VARIABLE RANGE는 1M 위쪽으로 BASE, MASK로 가변적인 영역이다.
+	 */
 	rdmsr(MSR_MTRRcap, lo, dummy);
+	/* 8번비트: fixed range의 지원여부 */
 	mtrr_state.have_fixed = (lo >> 8) & 1;
 
+	/* variable range 를 얻는다. */
 	for (i = 0; i < num_var_ranges; i++)
 		get_mtrr_var_range(i, &vrs[i]);
 	if (mtrr_state.have_fixed)
-		get_fixed_ranges(mtrr_state.fixed_ranges);
+		get_fixed_ranges(mtrr_state.fixed_ranges); /* fixed range 를 얻는다. */
 
 	rdmsr(MSR_MTRRdefType, lo, dummy);
 	mtrr_state.def_type = (lo & 0xff);
+	
+	/* 이 변수는 두 비트로 E(11번비트)와 FE(10번비트) 비트이다 (MTRR Enable, Fixed Enable) */
 	mtrr_state.enabled = (lo & 0xc00) >> 10;
 
 	if (amd_special_default_mtrr()) {
@@ -419,13 +445,13 @@ void __init get_mtrr_state(void)
 	mtrr_state_set = 1;
 
 	/* PAT setup for BP. We need to go through sync steps here */
-	local_irq_save(flags);
-	prepare_set();
+	local_irq_save(flags);	/* 플래그 저장, 인터럽트 금지 */
+	prepare_set();		/* MTRR 상태 저장, 캐시 금지 */
 
-	pat_init();
+	pat_init();		/* PAT 값 세팅 */
 
 	post_set();
-	local_irq_restore(flags);
+	local_irq_restore(flags); /* 복원 */
 }
 
 /* Some BIOS's are messed up and don't set all MTRRs the same! */
@@ -657,6 +683,7 @@ static DEFINE_RAW_SPINLOCK(set_atomicity_lock);
  * The caller must ensure that local interrupts are disabled and
  * are reenabled after post_set() has been called.
  */
+/* 캐시 세팅 전에 금지 */
 static void prepare_set(void) __acquires(set_atomicity_lock)
 {
 	unsigned long cr0;
@@ -668,26 +695,29 @@ static void prepare_set(void) __acquires(set_atomicity_lock)
 	 * changes to the way the kernel boots
 	 */
 
-	raw_spin_lock(&set_atomicity_lock);
+	raw_spin_lock(&set_atomicity_lock); /* 락을 건다. */
 
 	/* Enter the no-fill (CD=1, NW=0) cache mode and flush caches. */
-	cr0 = read_cr0() | X86_CR0_CD;
-	write_cr0(cr0);
-	wbinvd();
+	cr0 = read_cr0() | X86_CR0_CD; /* Globally enables/disable the memory cache 이런 것이다. */
+	write_cr0(cr0); /* CD 비트를 켜서 캐시 금지 */
+	wbinvd();	/* Flushes internal cache */
 
 	/* Save value of CR4 and clear Page Global Enable (bit 7) */
+	/* PGE가 켜있으면 TLB가 FLUSH안될수 있기 때문에 CLEAR 한다. */
 	if (cpu_has_pge) {
 		cr4 = read_cr4();
 		write_cr4(cr4 & ~X86_CR4_PGE);
 	}
 
 	/* Flush all TLBs via a mov %cr3, %reg; mov %reg, %cr3 */
-	__flush_tlb();
+	__flush_tlb();		/* CR3을 이용해 TLB 비운다. */
 
 	/* Save MTRR state */
+	/* MTRR 기본 상태 저장 */
 	rdmsr(MSR_MTRRdefType, deftype_lo, deftype_hi);
 
 	/* Disable MTRRs, and set the default type to uncached */
+	/* MTRR, Fixed range , type=uncacheable */
 	mtrr_wrmsr(MSR_MTRRdefType, deftype_lo & ~0xcff, deftype_hi);
 	wbinvd();
 }
@@ -701,12 +731,14 @@ static void post_set(void) __releases(set_atomicity_lock)
 	mtrr_wrmsr(MSR_MTRRdefType, deftype_lo, deftype_hi);
 
 	/* Enable caches */
+	/* 캐시 사용 */
 	write_cr0(read_cr0() & 0xbfffffff);
 
 	/* Restore value of CR4 */
+	/* PGE 상태 복원 */
 	if (cpu_has_pge)
 		write_cr4(cr4);
-	raw_spin_unlock(&set_atomicity_lock);
+	raw_spin_unlock(&set_atomicity_lock); /* 락을 푼다. */
 }
 
 static void generic_set_all(void)

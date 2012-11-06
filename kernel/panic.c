@@ -65,6 +65,7 @@ void __weak panic_smp_self_stop(void)
  *	Display a message, then perform cleanups.
  *
  *	This function never returns.
+ *      봤음.
  */
 void panic(const char *fmt, ...)
 {

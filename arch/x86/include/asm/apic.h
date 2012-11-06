@@ -28,6 +28,9 @@
  * information and apic=debug for _lots_ of information.
  * apic_verbosity is defined in apic.c
  */
+/* verbosity이하있때 출력한다.
+ * 3번째인자 이후를 인자로 넘겨준다.
+ */
 #define apic_printk(v, s, a...) do {       \
 		if ((v) <= apic_verbosity) \
 			printk(s, ##a);    \
@@ -106,6 +109,7 @@ static inline void native_apic_mem_write(u32 reg, u32 v)
 		       ASM_OUTPUT2("0" (v), "m" (*addr)));
 }
 
+/* FIX_APIC_BASE 주소에서 레지스터를 읽어온다. */
 static inline u32 native_apic_mem_read(u32 reg)
 {
 	return *((volatile u32 *)(APIC_BASE + reg));
@@ -188,9 +192,9 @@ static inline int x2apic_enabled(void)
 {
 	u64 msr;
 
-	if (!cpu_has_x2apic)
+	if (!cpu_has_x2apic)	/* 지원 안하면 리턴 */
 		return 0;
-
+	/* MSR에서 다시 확인 */
 	rdmsrl(MSR_IA32_APICBASE, msr);
 	if (msr & X2APIC_ENABLE)
 		return 1;
@@ -408,6 +412,7 @@ extern struct apic *apic;
  * For the files having two apic drivers, we use apic_drivers()
  * to enforce the order with in them.
  */
+/* 이 매크로로 등록하면 .apicdrivers 섹션으로 들어간다. */
 #define apic_driver(sym)					\
 	static const struct apic *__apicdrivers_##sym __used		\
 	__aligned(sizeof(struct apic *))			\
@@ -429,7 +434,7 @@ extern int wakeup_secondary_cpu_via_nmi(int apicid, unsigned long start_eip);
 #endif
 
 #ifdef CONFIG_X86_LOCAL_APIC
-
+/* fixed_address의 FIX_APIC_BASE 페이지 + 레지스터에서 값을 읽는다. */
 static inline u32 apic_read(u32 reg)
 {
 	return apic->read(reg);
@@ -549,10 +554,14 @@ static inline const struct cpumask *online_target_cpus(void)
 DECLARE_EARLY_PER_CPU_READ_MOSTLY(u16, x86_bios_cpu_apicid);
 
 
+/**
+ * 등록된 APIC 드라이버로부터 APIC_ID(0x20) 를 얻어온다
+ * apic->read는 fixmap의 apic 테이블에서 정보를 읽는다.
+ */
 static inline unsigned int read_apic_id(void)
 {
 	unsigned int reg;
-
+	/* apic는 64비트에서 apic_flat일 것이다. */
 	reg = apic_read(APIC_ID);
 
 	return apic->get_apic_id(reg);

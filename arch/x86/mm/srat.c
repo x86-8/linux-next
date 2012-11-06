@@ -25,7 +25,7 @@
 #include <asm/uv/uv.h>
 
 int acpi_numa __initdata;
-
+/* pxm 정보와 node를 매핑, 매핑되어 있지 않으면 node값 할당 */
 static __init int setup_node(int pxm)
 {
 	return acpi_map_pxm_to_node(pxm);
@@ -36,7 +36,7 @@ static __init void bad_srat(void)
 	printk(KERN_ERR "SRAT: SRAT not used.\n");
 	acpi_numa = -1;
 }
-
+/* acpi numa를 사용할수 없는지 검사 */
 static __init inline int srat_disabled(void)
 {
 	return acpi_numa < 0;
@@ -47,6 +47,7 @@ void __init acpi_numa_slit_init(struct acpi_table_slit *slit)
 {
 	int i, j;
 
+	/* NODE 마다 distance 를 얻어와서 저장 */
 	for (i = 0; i < slit->locality_count; i++)
 		for (j = 0; j < slit->locality_count; j++)
 			numa_set_distance(pxm_to_node(i), pxm_to_node(j),
@@ -86,8 +87,11 @@ acpi_numa_x2apic_affinity_init(struct acpi_srat_x2apic_cpu_affinity *pa)
 		printk(KERN_INFO "SRAT: PXM %u -> APIC 0x%04x -> Node %u skipped apicid that is too big\n", pxm, apic_id, node);
 		return;
 	}
+  /* ACPI ID와 node id를 1대1 매핑. numa_emulation시에 사용 */
 	set_apicid_to_node(apic_id, node);
+	/* 파싱이 완료된(APIC로부터 찾아낸) node 설정 */
 	node_set(node, numa_nodes_parsed);
+	/* numa 완료 상태 설정 (-1일 경우 실패) */
 	acpi_numa = 1;
 	printk(KERN_INFO "SRAT: PXM %u -> APIC 0x%04x -> Node %u\n",
 	       pxm, apic_id, node);
@@ -102,6 +106,7 @@ acpi_numa_processor_affinity_init(struct acpi_srat_cpu_affinity *pa)
 
 	if (srat_disabled())
 		return;
+	/* 헤더 크기가 일치하지 않으면 에러출력, disable, 리턴 */
 	if (pa->header.length != sizeof(struct acpi_srat_cpu_affinity)) {
 		bad_srat();
 		return;
@@ -111,6 +116,7 @@ acpi_numa_processor_affinity_init(struct acpi_srat_cpu_affinity *pa)
 	pxm = pa->proximity_domain_lo;
 	if (acpi_srat_revision >= 2)
 		pxm |= *((unsigned int*)pa->proximity_domain_hi) << 8;
+	/* ACPI로 부터 얻어온 pxm으로부터 node를 얻어온다 */
 	node = setup_node(pxm);
 	if (node < 0) {
 		printk(KERN_ERR "SRAT: Too many proximity domains %x\n", pxm);
@@ -118,6 +124,7 @@ acpi_numa_processor_affinity_init(struct acpi_srat_cpu_affinity *pa)
 		return;
 	}
 
+	/* ACPI로 부터 얻어온 apic id 설정 */
 	if (get_uv_system_type() >= UV_X2APIC)
 		apic_id = (pa->apic_id << 8) | pa->local_sapic_eid;
 	else
@@ -128,6 +135,7 @@ acpi_numa_processor_affinity_init(struct acpi_srat_cpu_affinity *pa)
 		return;
 	}
 
+	/* node에 apic id 설정 */
 	set_apicid_to_node(apic_id, node);
 	node_set(node, numa_nodes_parsed);
 	acpi_numa = 1;
@@ -154,16 +162,21 @@ acpi_numa_memory_affinity_init(struct acpi_srat_mem_affinity *ma)
 		bad_srat();
 		return -1;
 	}
+	/* Memory Affinity (SRAT) 정보를 사용하지 않음 */
 	if ((ma->flags & ACPI_SRAT_MEM_ENABLED) == 0)
 		return -1;
 
+	/* Memory Hot Pluggable 이사용되지만, CONFIG 에 설정되어 있지 않은 경우 */
 	if ((ma->flags & ACPI_SRAT_MEM_HOT_PLUGGABLE) && !save_add_info())
 		return -1;
+
+	/* ACPI(SRAT)로 얻어온 Memory Affinity 정보를 설정 */
 	start = ma->base_address;
 	end = start + ma->length;
 	pxm = ma->proximity_domain;
 	if (acpi_srat_revision <= 1)
 		pxm &= 0xff;
+	/* pxm 으로 node id를 가져옮 */
 	node = setup_node(pxm);
 	if (node < 0) {
 		printk(KERN_ERR "SRAT: Too many proximity domains.\n");
@@ -171,6 +184,7 @@ acpi_numa_memory_affinity_init(struct acpi_srat_mem_affinity *ma)
 		return -1;
 	}
 
+	/* node에 memory block을 추가 */
 	if (numa_add_memblk(node, start, end) < 0) {
 		bad_srat();
 		return -1;
@@ -185,7 +199,7 @@ acpi_numa_memory_affinity_init(struct acpi_srat_mem_affinity *ma)
 }
 
 void __init acpi_numa_arch_fixup(void) {}
-
+/* acpi를 통해 node 정보를 가져오고 관련 자료구조를 초기화한다. */
 int __init x86_acpi_numa_init(void)
 {
 	int ret;

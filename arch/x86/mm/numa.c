@@ -132,6 +132,7 @@ void __init setup_node_to_cpumask_map(void)
 	pr_debug("Node to cpumask map for %d nodes\n", nr_node_ids);
 }
 
+/* NUMA의 메모리 범위, node id 정보 추가 */
 static int __init numa_add_memblk_to(int nid, u64 start, u64 end,
 				     struct numa_meminfo *mi)
 {
@@ -163,6 +164,8 @@ static int __init numa_add_memblk_to(int nid, u64 start, u64 end,
  * @idx: Index of memblk to remove
  * @mi: numa_meminfo to remove memblk from
  *
+ * 안보고 패스!
+ *
  * Remove @idx'th numa_memblk from @mi by shifting @mi->blk[] and
  * decrementing @mi->nr_blks.
  */
@@ -184,6 +187,7 @@ void __init numa_remove_memblk_from(int idx, struct numa_meminfo *mi)
  * RETURNS:
  * 0 on success, -errno on failure.
  */
+/* numa_meminfo에 해당 range와 node id 정보 추가 */
 int __init numa_add_memblk(int nid, u64 start, u64 end)
 {
 	return numa_add_memblk_to(nid, start, end, &numa_meminfo);
@@ -254,8 +258,19 @@ static void __init setup_node_data(int nid, u64 start, u64 end)
  * Sanitize @mi by merging and removing unncessary memblks.  Also check for
  * conflicts and clear unused memblks.
  *
+ * 1. Trim all
+ * 2. Merge / Overlapping
+ * 3. Clear
+ *
  * RETURNS:
  * 0 on success, -errno on failure.
+ */
+/**
+ * NUMA 메모리 정보에서 메모리를 깨끗하게 만듦.
+ *
+ * 1. trim => start와 end가 반대거나 같은 경우로, 필요가 없음.
+ * 2. merge => 메모리 정보가 겹쳐있거나 연이어 있으면 통합.
+ * 3. clear => 비어 있으니 제거.
  */
 int __init numa_cleanup_meminfo(struct numa_meminfo *mi)
 {
@@ -310,6 +325,7 @@ int __init numa_cleanup_meminfo(struct numa_meminfo *mi)
 				continue;
 			start = min(bi->start, bj->start);
 			end = max(bi->end, bj->end);
+			/* 다시 검색을 시도하여, start와 end block에 포함되는지 검사  */
 			for (k = 0; k < mi->nr_blks; k++) {
 				struct numa_memblk *bk = &mi->blk[k];
 
@@ -318,11 +334,14 @@ int __init numa_cleanup_meminfo(struct numa_meminfo *mi)
 				if (start < bk->end && end > bk->start)
 					break;
 			}
+			/* k가 nr_blks보다 작다는 것은 bk가 start,end사이에 포함된다는 것이므로,
+			 * continue를 통해 새로운 bj로 다시 검사  */
 			if (k < mi->nr_blks)
 				continue;
 			printk(KERN_INFO "NUMA: Node %d [mem %#010Lx-%#010Lx] + [mem %#010Lx-%#010Lx] -> [mem %#010Lx-%#010Lx]\n",
 			       bi->nid, bi->start, bi->end - 1, bj->start,
 			       bj->end - 1, start, end - 1);
+			/* k가 nr_blks보다 크므로 start와 end가 유일하니, 통합한다  */
 			bi->start = start;
 			bi->end = end;
 			numa_remove_memblk_from(j--, mi);
@@ -341,6 +360,9 @@ int __init numa_cleanup_meminfo(struct numa_meminfo *mi)
 /*
  * Set nodes, which have memory in @mi, in *@nodemask.
  */
+/* NUMA Memory 정보가 들어 있는(사용가능한) 경우, nodemask에 추가.
+   nodemask에 빠져 있는(CPU Affinity에서 얻어왔기 때문에) node를,
+   Memory Affinity정보로 추가(보완)할수 있을 거라고 보임 */
 static void __init numa_nodemask_from_meminfo(nodemask_t *nodemask,
 					      const struct numa_meminfo *mi)
 {
@@ -358,10 +380,11 @@ static void __init numa_nodemask_from_meminfo(nodemask_t *nodemask,
  * The current table is freed.  The next numa_set_distance() call will
  * create a new one.
  */
+/* distance를 0으로 초기화, 기존에 있으면 0으로 초기화  */
 void __init numa_reset_distance(void)
 {
 	size_t size = numa_distance_cnt * numa_distance_cnt * sizeof(numa_distance[0]);
-
+	/* distance count가 있으면 memblock에서 해제(reversed에서 free)한다.  */
 	/* numa_distance could be 1LU marking allocation failure, test cnt */
 	if (numa_distance_cnt)
 		memblock_free(__pa(numa_distance), size);
@@ -377,14 +400,17 @@ static int __init numa_alloc_distance(void)
 	u64 phys;
 
 	/* size the new table and allocate it */
+	/* numa_nodes_parsed에는 이미 분석이 끝난 node 정보들이 들어 있음 */
 	nodes_parsed = numa_nodes_parsed;
 	numa_nodemask_from_meminfo(&nodes_parsed, &numa_meminfo);
 
+	/* 마지막 node id가 cnt로 됨 */
 	for_each_node_mask(i, nodes_parsed)
 		cnt = i;
 	cnt++;
 	size = cnt * cnt * sizeof(numa_distance[0]);
 
+	/* size크기 만큼 할당가능한 메모리 주소를 얻어옮 */
 	phys = memblock_find_in_range(0, PFN_PHYS(max_pfn_mapped),
 				      size, PAGE_SIZE);
 	if (!phys) {
@@ -393,12 +419,17 @@ static int __init numa_alloc_distance(void)
 		numa_distance = (void *)1LU;
 		return -ENOMEM;
 	}
+  /* size 크기 만큼 등록 */
 	memblock_reserve(phys, size);
 
+	/* numa_distance 재설정 */
 	numa_distance = __va(phys);
 	numa_distance_cnt = cnt;
 
 	/* fill with the default distances */
+	/* 기본 distance 설정.
+	같은 node일경우 Local Distance(10)를,
+	아닌 경우 RemoteDistance(20) 저장 */
 	for (i = 0; i < cnt; i++)
 		for (j = 0; j < cnt; j++)
 			numa_distance[i * cnt + j] = i == j ?
@@ -427,11 +458,14 @@ static int __init numa_alloc_distance(void)
  * is ignored.
  * This is to allow simplification of specific NUMA config implementations.
  */
+/* from(NODE id) 에서 to(NODE id)까지의 거리를 distance테이블에 저장 */
 void __init numa_set_distance(int from, int to, int distance)
 {
+	/* numa_distance가 없는데, 할당이 불가능한 경우 */
 	if (!numa_distance && numa_alloc_distance() < 0)
 		return;
 
+	/* from, to가 distance 테이블의 갯수를 벗어나는 경우 */
 	if (from >= numa_distance_cnt || to >= numa_distance_cnt ||
 			from < 0 || to < 0) {
 		pr_warn_once("NUMA: Warning: node ids are out of bound, from=%d to=%d distance=%d\n",
@@ -445,7 +479,7 @@ void __init numa_set_distance(int from, int to, int distance)
 			     from, to, distance);
 		return;
 	}
-
+	/* 거리 세팅  */
 	numa_distance[from * numa_distance_cnt + to] = distance;
 }
 
@@ -461,16 +495,21 @@ EXPORT_SYMBOL(__node_distance);
  * Sanity check to catch more bad NUMA configurations (they are amazingly
  * common).  Make sure the nodes cover all memory.
  */
+/* NUMA설정이 정상적인지 확인. Sanityze가 정상적이었다면 메모리 설정
+ * 역시 문제 없어야 함 */
 static bool __init numa_meminfo_cover_memory(const struct numa_meminfo *mi)
 {
 	u64 numaram, e820ram;
 	int i;
 
+  /* NUMA가 사용할 수 있는 램의 전체 크기에서 쓸 수 없는(부재) 페이지
+   * 크기 만큼을 제거 */
 	numaram = 0;
 	for (i = 0; i < mi->nr_blks; i++) {
 		u64 s = mi->blk[i].start >> PAGE_SHIFT;
 		u64 e = mi->blk[i].end >> PAGE_SHIFT;
 		numaram += e - s;
+    /* 메모리 설정을 가지고, nid의 쓸 수 없는 페이지 크기만큼을 뺌 */
 		numaram -= __absent_pages_in_range(mi->blk[i].nid, s, e);
 		if ((s64)numaram < 0)
 			numaram = 0;
@@ -479,6 +518,9 @@ static bool __init numa_meminfo_cover_memory(const struct numa_meminfo *mi)
 	e820ram = max_pfn - absent_pages_in_range(0, max_pfn);
 
 	/* We seem to lose 3 pages somewhere. Allow 1M of slack. */
+  /* NUMA에서는 모든 NODE가 e820 메모리를 커버한다고 간주하기 때문에
+   * e820 메모리에서 NUMA의 설정된 메모리의 차이(쓸수없는 페이지
+   * 영역)가 1M을 넘어서면 에러라고 판단하는듯? */
 	if ((s64)(e820ram - numaram) >= (1 << (20 - PAGE_SHIFT))) {
 		printk(KERN_ERR "NUMA: nodes only cover %LuMB of your %LuMB e820 RAM. Not used.\n",
 		       (numaram << PAGE_SHIFT) >> 20,
@@ -494,11 +536,15 @@ static int __init numa_register_memblks(struct numa_meminfo *mi)
 	int i, nid;
 
 	/* Account for nodes with cpus and no memory */
+        /* 사용가능한 node 정보(node_possible_map)를 meminfo(mi)로 보완
+         * CPU들만 가지고 있는 노드들을 계산해 준다. 
+         */
 	node_possible_map = numa_nodes_parsed;
 	numa_nodemask_from_meminfo(&node_possible_map, mi);
 	if (WARN_ON(nodes_empty(node_possible_map)))
 		return -EINVAL;
 
+  /* mi-blk[i]에 해당되는 사용가능한 memblock영역을 nid에 등록 */
 	for (i = 0; i < mi->nr_blks; i++) {
 		struct numa_memblk *mb = &mi->blk[i];
 		memblock_set_node(mb->start, mb->end - mb->start, mb->nid);
@@ -507,6 +553,10 @@ static int __init numa_register_memblks(struct numa_meminfo *mi)
 	/*
 	 * If sections array is gonna be used for pfn -> nid mapping, check
 	 * whether its granularity is fine enough.
+         * 페이지 프레임 플래그의 두 부분중 한 부분은 nid를 나타낸다.
+         * 만약 이를 사용하지 않으면 섹션을 사용해 맵핑해줘야 한다.
+         * 노드는 PAGES_PER_SECTION 보다 작게 정렬되어 있어야 한다.
+         * FIXME: 말이 이상하니 고쳐주세요.
 	 */
 #ifdef NODE_NOT_IN_PAGE_FLAGS
 	pfn_align = node_map_pfn_alignment();
@@ -517,6 +567,7 @@ static int __init numa_register_memblks(struct numa_meminfo *mi)
 		return -EINVAL;
 	}
 #endif
+  /* NUMA (메모리)설정이 정상적인지 확인 */
 	if (!numa_meminfo_cover_memory(mi))
 		return -EINVAL;
 
@@ -570,7 +621,7 @@ static int __init numa_init(int (*init_func)(void))
 
 	for (i = 0; i < MAX_LOCAL_APIC; i++)
 		set_apicid_to_node(i, NUMA_NO_NODE);
-
+	/* 자료구조를 0으로 초기화한다.  */
 	nodes_clear(numa_nodes_parsed);
 	nodes_clear(node_possible_map);
 	nodes_clear(node_online_map);
@@ -578,13 +629,22 @@ static int __init numa_init(int (*init_func)(void))
 	WARN_ON(memblock_set_node(0, ULLONG_MAX, MAX_NUMNODES));
 	numa_reset_distance();
 
+	/* NUMA 정보를 얻어오는 핸들러 함수 실행 */
 	ret = init_func();
 	if (ret < 0)
 		return ret;
+	/* Sanitize - NUMA 메모리 정보중 겹쳐진것을 통합하고,
+	 * 쓸데없는 것을 제거. */
 	ret = numa_cleanup_meminfo(&numa_meminfo);
+
+	/* clean up 실패시 */
 	if (ret < 0)
 		return ret;
 
+	/* CONFIG 정보는 비활성화되어 있지만, 커널 파라미터로 NODE 크기를 받아들여,
+	 * NUMA Node를 가상으로 생성. 실제 Physical Node가 있어도 여분의
+	 * 메모리를 가지고 (가상의)NODE를 더 만들수 있는 것으로 보임.
+	 */
 	numa_emulation(&numa_meminfo, numa_distance_cnt);
 
 	ret = numa_register_memblks(&numa_meminfo);
@@ -635,20 +695,24 @@ static int __init dummy_numa_init(void)
 void __init x86_numa_init(void)
 {
 	if (!numa_off) {
+	/* 성공값은 0, 성공하면 바로 리턴한다.  */
 #ifdef CONFIG_X86_NUMAQ
+		/* IBM  */
 		if (!numa_init(numaq_numa_init))
 			return;
 #endif
 #ifdef CONFIG_ACPI_NUMA
+		/* ACPI를 통한 numa 탐색방법 */
 		if (!numa_init(x86_acpi_numa_init))
 			return;
 #endif
 #ifdef CONFIG_AMD_NUMA
+		/* 옛날 amd opteron 탐색방법  */
 		if (!numa_init(amd_numa_init))
 			return;
 #endif
 	}
-
+	/* 찾지 못했을때 출력 & 초기화  */
 	numa_init(dummy_numa_init);
 }
 

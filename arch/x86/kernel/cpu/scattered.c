@@ -53,18 +53,24 @@ void __cpuinit init_scattered_cpuid_features(struct cpuinfo_x86 *c)
 		{ X86_FEATURE_PFTHRESHOLD,	CR_EDX,12, 0x8000000a, 0 },
 		{ 0, 0, 0, 0, 0 }
 	};
+	/*	순서대로 u16 feature;	u8 reg;	u8 bit;	u32 level;	u32 sub_leaf; */
 
 	for (cb = cpuid_bits; cb->feature; cb++) {
 
 		/* Verify that the level is valid */
+
+		/* 해당 레벨의 0 or 0x8000.. 최대값을 구한다.  */
 		max_level = cpuid_eax(cb->level & 0xffff0000);
+		/* 0x00000000 또는 0x80000000로 얻어온 최대 지원 level값이 
+		 * 현재 요청할 cpuid 레벨보다 낮거나, 완전히 벗어나는 경우(0xFFFF)
+		 * cpuid를 요청하지 않도록 처리 */
 		if (max_level < cb->level ||
 		    max_level > (cb->level | 0xffff))
 			continue;
 
 		cpuid_count(cb->level, cb->sub_leaf, &regs[CR_EAX],
 			    &regs[CR_EBX], &regs[CR_ECX], &regs[CR_EDX]);
-
+ /* c->bit가 TRUE면 FEATURE의 비트도 1 */
 		if (regs[cb->reg] & (1 << cb->bit))
 			set_cpu_cap(c, cb->feature);
 	}

@@ -67,7 +67,7 @@
  * For exit sections the same issue exists.
  *
  * The following markers are used for the cases where the reference to
- * the *init / *exit section (code or data) is valid and will teach
+  * the *init / *exit section (code or data) is valid and will teach
  * modpost not to issue a warning.  Intended semantics is that a code or
  * data tagged __ref* can reference code or data from init section without
  * producing a warning (of course, no warning does not mean code is
@@ -101,6 +101,9 @@
 #define __devexitdata    __section(.devexit.data)
 #define __devexitconst   __constsection(.devexit.rodata)
 
+/* __cold 영역으로 선언하면 잘 사용하지 않는 영역으로 간주하고 최적화한다.
+ * cold영역들을 뭉쳐놓으면 자주 쓰는 영역의 지역성을 높일 수 있다. 
+ */
 /* Used for HOTPLUG_CPU */
 #define __cpuinit        __section(.cpuinit.text) __cold notrace
 #define __cpuinitdata    __section(.cpuinit.data)
@@ -247,6 +250,11 @@ struct obs_kernel_param {
  * Force the alignment so the compiler doesn't space elements of the
  * obs_kernel_param "array" too far apart in .init.setup.
  */
+/* 파라미터가 호출되면 해당 함수 역시 호출된다.
+ * initconst로 .init.rodata에 넣어주고
+ * .init.setup에는 포인터와 값들을 넣어준다.
+ * .init.setup은 파라미터를 함수로 연결시킨다.
+ */
 #define __setup_param(str, unique_id, fn, early)			\
 	static const char __setup_str_##unique_id[] __initconst	\
 		__aligned(1) = str; \
@@ -260,6 +268,7 @@ struct obs_kernel_param {
 
 /* NOTE: fn is as per module_param, not __setup!  Emits warning if fn
  * returns non-zero. */
+/* early 필드가 1이 되면 early 로 등록 */
 #define early_param(str, fn)					\
 	__setup_param(str, fn, fn, 1)
 

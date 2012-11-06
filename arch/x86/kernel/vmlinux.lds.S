@@ -14,6 +14,7 @@
  * put it inside the section definition.
  */
 
+/* 가상주소가 아닌 LMA를 구하기 위한 매크로, VMA를 빼서 구한다. */	
 #ifdef CONFIG_X86_32
 #define LOAD_OFFSET __PAGE_OFFSET
 #else
@@ -36,6 +37,7 @@ OUTPUT_ARCH(i386)
 ENTRY(phys_startup_32)
 jiffies = jiffies_64;
 #else
+/* 64비트면 시작주소는 phys_startup_64다 */
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(phys_startup_64)
 jiffies_64 = jiffies;
@@ -85,14 +87,19 @@ SECTIONS
         . = LOAD_OFFSET + LOAD_PHYSICAL_ADDR;
         phys_startup_32 = startup_32 - LOAD_OFFSET;
 #else
+	/* load될 VMA 주소를 바꾼다. 이 값은 LOAD_OFFSET + 16M 이다. */
         . = __START_KERNEL;
         phys_startup_64 = startup_64 - LOAD_OFFSET;
+/* LOAD_OFFSET == 0xffffffff80000000 물리메모리와의 직접매핑구역 진입(시작)지점이다. */
 #endif
 
 	/* Text and read-only data */
+	/* .text의 LMA는 16M ; VMA는 0xffffffff80000000 + 16M */ 
 	.text :  AT(ADDR(.text) - LOAD_OFFSET) {
-		_text = .;
-		/* bootstrapping code */
+		_text = .;	
+	/* VMA == __START_KERNEL(LOAD_OFFSET == 16M) */
+		/* bootstrapping code */ 
+	/* 커널의 시작 = x86/kernel/head_64.S */
 		HEAD_TEXT
 #ifdef CONFIG_X86_32
 		. = ALIGN(PAGE_SIZE);
@@ -100,6 +107,7 @@ SECTIONS
 #endif
 		. = ALIGN(8);
 		_stext = .;
+	/* 각 text_section을 모아주는 것. */
 		TEXT_TEXT
 		SCHED_TEXT
 		LOCK_TEXT
@@ -108,10 +116,10 @@ SECTIONS
 		IRQENTRY_TEXT
 		*(.fixup)
 		*(.gnu.warning)
-		/* End of text section */
+	/* End of text section */
 		_etext = .;
 	} :text = 0x9090
-
+    /* 0x90은 nop이다. */
 	NOTES :text :note
 
 	EXCEPTION_TABLE(16) :text = 0x9090
@@ -141,6 +149,7 @@ SECTIONS
 
 		CACHELINE_ALIGNED_DATA(L1_CACHE_BYTES)
 
+		/* asm-generic에 있는 vmlinus.lds.h의 DATA공간이 들어간다. (스택포함) */
 		DATA_DATA
 		CONSTRUCTORS
 
@@ -310,9 +319,13 @@ SECTIONS
 
 	. = ALIGN(PAGE_SIZE);
 	.brk : AT(ADDR(.brk) - LOAD_OFFSET) {
+	/* 커널에서 bss는 bss끝이다. (=heap)  */
 		__brk_base = .;
-		. += 64 * 1024;		/* 64k alignment slop space */
-		*(.brk_reservation)	/* areas brk users have reserved */
+	/* 64k alignment slop space */
+		. += 64 * 1024;
+	/* areas brk users have reserved */
+		*(.brk_reservation)
+	/* 공간 확보 */
 		__brk_limit = .;
 	}
 

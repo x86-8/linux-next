@@ -56,8 +56,18 @@
 /*
  * Wrap the arch provided IRQ routines to provide appropriate checks.
  */
+/*
+ * raw_local_ 매크로 함수들은 플래그의 타입을 체크해서 다르면 워닝을 띄우고 arch_local_irq 함수를 호출한다.
+ * irq_disable/enable은 인터럽트(irq)만 금지/허용 한다.
+ * irq 관련 명령어는 대부분 memory 장벽을 친다.
+ */
 #define raw_local_irq_disable()		arch_local_irq_disable()
 #define raw_local_irq_enable()		arch_local_irq_enable()
+ /*
+  * do.. while(0)를 사용하면 매크로를 함수처럼 쓸수 있다. (세미콜론 문제 & 한줄 if문 에러)
+  * irq_save는 플래그를 저장하고 인터럽트 금지, 플래그 값 리턴
+  * irq_restore는 플래그를 복원시켜 이전 인터럽트 허용/금지 상태도 복원
+  */
 #define raw_local_irq_save(flags)			\
 	do {						\
 		typecheck(unsigned long, flags);	\
@@ -68,11 +78,13 @@
 		typecheck(unsigned long, flags);	\
 		arch_local_irq_restore(flags);		\
 	} while (0)
+/* 플래그만 저장 */
 #define raw_local_save_flags(flags)			\
 	do {						\
 		typecheck(unsigned long, flags);	\
 		flags = arch_local_save_flags();	\
 	} while (0)
+/* 인터럽트 금지면 참값을 남긴다.(리턴) */
 #define raw_irqs_disabled_flags(flags)			\
 	({						\
 		typecheck(unsigned long, flags);	\
@@ -88,6 +100,7 @@
 #ifdef CONFIG_TRACE_IRQFLAGS_SUPPORT
 #define local_irq_enable() \
 	do { trace_hardirqs_on(); raw_local_irq_enable(); } while (0)
+/* 인터럽트 금지 & 최적화 장벽 *//*  */
 #define local_irq_disable() \
 	do { raw_local_irq_disable(); trace_hardirqs_off(); } while (0)
 #define local_irq_save(flags)				\

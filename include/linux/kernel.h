@@ -62,6 +62,7 @@
 #endif
 
 /* The `const' in roundup() prevents gcc-3.3 from calling __divdi3 */
+/* round up은 올림 */
 #define roundup(x, y) (					\
 {							\
 	const typeof(y) __y = y;			\
@@ -101,7 +102,7 @@
 }							\
 )
 
-
+/* 0이면 자신이 리턴할 주소 1,2,3으로 +레벨을 지정가능 */
 #define _RET_IP_		(unsigned long)__builtin_return_address(0)
 #define _THIS_IP_  ({ __label__ __here; __here: (unsigned long)&&__here; })
 
@@ -161,6 +162,7 @@ extern int _cond_resched(void);
 # define might_sleep() \
 	do { __might_sleep(__FILE__, __LINE__, 0); might_resched(); } while (0)
 #else
+/* 보통은 ATOMIC_SLEEP은 꺼져있다. 고로 빈함수 */
   static inline void __might_sleep(const char *file, int line,
 				   int preempt_offset) { }
 # define might_sleep() do { might_resched(); } while (0)
@@ -555,14 +557,14 @@ static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
 /*
  * min()/max()/clamp() macros that also do
  * strict type-checking.. See the
- * "unnecessary" pointer comparison.
+ * "unnecessary" pointer comparison. 포인터 따위는 비교하지 않는다.
  */
 #define min(x, y) ({				\
 	typeof(x) _min1 = (x);			\
 	typeof(y) _min2 = (y);			\
 	(void) (&_min1 == &_min2);		\
 	_min1 < _min2 ? _min1 : _min2; })
-
+/* x가 더 크면 x를 반환 아니면 y를 반환  */
 #define max(x, y) ({				\
 	typeof(x) _max1 = (x);			\
 	typeof(y) _max2 = (y);			\
@@ -680,6 +682,12 @@ static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
  * @member:	the name of the member within the struct.
  *
  */
+/* 구조체의 시작주소를 구한다.
+ * 한줄로 써도 되지만 member의 타입과 ptr의 타입이 다를 경우
+ * warning을 낼 것이라 추측한다.
+ * http://forum.falinux.com/zbxe/?document_srl=531954
+ */
+
 #define container_of(ptr, type, member) ({			\
 	const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
 	(type *)( (char *)__mptr - offsetof(type,member) );})

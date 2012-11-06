@@ -1972,11 +1972,12 @@ struct page *alloc_pages_current(gfp_t gfp, unsigned order)
 	struct mempolicy *pol = current->mempolicy;
 	struct page *page;
 	unsigned int cpuset_mems_cookie;
-
+	/* 정책 결정이 안되있으면 기본으로 */
 	if (!pol || in_interrupt() || (gfp & __GFP_THISNODE))
 		pol = &default_policy;
 
 retry_cpuset:
+	/* current의 mems_allowed_change_disable를 증가 */
 	cpuset_mems_cookie = get_mems_allowed();
 
 	/*

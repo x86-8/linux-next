@@ -2,7 +2,13 @@
 #define __LINUX_COMPILER_H
 
 #ifndef __ASSEMBLY__
+/* __CHECKER__는 커널 내부적으로 쓰이는 sparse에서 쓰이는 매크로다. accesor macro로써 가능하면 accesor macro들을 사용해 접근해야 한다.*/
 
+//This looks like it's for defining weakly-defined symbols, where an unresolved symbol gets set to NULL rather than causing the program to abort with an error.
+
+// http://studyfoss.egloos.com/5375570
+// http://kldp.org/node/96789
+// http://old.nabble.com/Significance-of--__iomem%22-td23191855.html
 #ifdef __CHECKER__
 # define __user		__attribute__((noderef, address_space(1)))
 # define __kernel	__attribute__((address_space(0)))
@@ -311,6 +317,9 @@ void ftrace_likely_update(struct ftrace_branch_data *f, int val, int expect);
  * merging, or refetching absolutely anything at any time.  Its main intended
  * use is to mediate communication between process-level code and irq/NMI
  * handlers, all running on the same CPU.
+ */
+/* spinlock에서 compiler가 메모리 최적화로 값을 읽는걸 생략해버리면 큰일난다.
+ * 그래서 volatile을 쓰고 가변적인 type을 고려해 typeof를 사용한다.
  */
 #define ACCESS_ONCE(x) (*(volatile typeof(x) *)&(x))
 

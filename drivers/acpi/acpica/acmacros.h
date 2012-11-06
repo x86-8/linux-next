@@ -87,7 +87,7 @@
 			  /* Big Endian      <==        Little Endian */
 			  /*  Hi...Lo                     Lo...Hi     */
 /* 16-bit source, 16/32/64 destination */
-
+/* ACPI 테이블 안의 숫자값들은 little endian을 따른다. 때문에 다른 엔디안을 사용하면 변환한다.  */
 #define ACPI_MOVE_16_TO_16(d, s)        {((  u8 *)(void *)(d))[0] = ((u8 *)(void *)(s))[1];\
 					   ((  u8 *)(void *)(d))[1] = ((u8 *)(void *)(s))[0];}
 
@@ -138,7 +138,7 @@
 /* The hardware supports unaligned transfers, just do the little-endian move */
 
 /* 16-bit source, 16/32/64 destination */
-
+/* 형 변환하는 매크로 eg. 16bits -> 32bits  */
 #define ACPI_MOVE_16_TO_16(d, s)        *(u16 *)(void *)(d) = *(u16 *)(void *)(s)
 #define ACPI_MOVE_16_TO_32(d, s)        *(u32 *)(void *)(d) = *(u16 *)(void *)(s)
 #define ACPI_MOVE_16_TO_64(d, s)        *(u64 *)(void *)(d) = *(u16 *)(void *)(s)
@@ -428,37 +428,40 @@
  */
 #ifndef ACPI_SIMPLE_RETURN_MACROS
 
-#define return_ACPI_STATUS(s)           ACPI_DO_WHILE0 ({ \
-											register acpi_status _s = (s); \
-											acpi_ut_status_exit (ACPI_DEBUG_PARAMETERS, _s); \
-											return (_s); })
-#define return_PTR(s)                   ACPI_DO_WHILE0 ({ \
-											register void *_s = (void *) (s); \
-											acpi_ut_ptr_exit (ACPI_DEBUG_PARAMETERS, (u8 *) _s); \
-											return (_s); })
-#define return_VALUE(s)                 ACPI_DO_WHILE0 ({ \
-											register u64 _s = (s); \
-											acpi_ut_value_exit (ACPI_DEBUG_PARAMETERS, _s); \
-											return (_s); })
-#define return_UINT8(s)                 ACPI_DO_WHILE0 ({ \
-											register u8 _s = (u8) (s); \
-											acpi_ut_value_exit (ACPI_DEBUG_PARAMETERS, (u64) _s); \
-											return (_s); })
-#define return_UINT32(s)                ACPI_DO_WHILE0 ({ \
-											register u32 _s = (u32) (s); \
-											acpi_ut_value_exit (ACPI_DEBUG_PARAMETERS, (u64) _s); \
-											return (_s); })
+/* s값이 반환(치환)된다.
+ * 디버깅, TRACE를 위해 매크로 사용(출력된다.)
+ */
+#define return_ACPI_STATUS(s)           ACPI_DO_WHILE0 ({			\
+			register acpi_status _s = (s);				\
+			acpi_ut_status_exit (ACPI_DEBUG_PARAMETERS, _s);	\
+			return (_s); })
+#define return_PTR(s)                   ACPI_DO_WHILE0 ({			\
+			register void *_s = (void *) (s);			\
+			acpi_ut_ptr_exit (ACPI_DEBUG_PARAMETERS, (u8 *) _s);	\
+			return (_s); })
+#define return_VALUE(s)                 ACPI_DO_WHILE0 ({			\
+			register u64 _s = (s);					\
+			acpi_ut_value_exit (ACPI_DEBUG_PARAMETERS, _s);		\
+			return (_s); })
+#define return_UINT8(s)                 ACPI_DO_WHILE0 ({			\
+			register u8 _s = (u8) (s);				\
+			acpi_ut_value_exit (ACPI_DEBUG_PARAMETERS, (u64) _s);	\
+			return (_s); })
+#define return_UINT32(s)                ACPI_DO_WHILE0 ({			\
+			register u32 _s = (u32) (s);				\
+			acpi_ut_value_exit (ACPI_DEBUG_PARAMETERS, (u64) _s);	\
+			return (_s); })
 #else				/* Use original less-safe macros */
 
-#define return_ACPI_STATUS(s)           ACPI_DO_WHILE0 ({ \
-											acpi_ut_status_exit (ACPI_DEBUG_PARAMETERS, (s)); \
-											return((s)); })
-#define return_PTR(s)                   ACPI_DO_WHILE0 ({ \
-											acpi_ut_ptr_exit (ACPI_DEBUG_PARAMETERS, (u8 *) (s)); \
-											return((s)); })
-#define return_VALUE(s)                 ACPI_DO_WHILE0 ({ \
-											acpi_ut_value_exit (ACPI_DEBUG_PARAMETERS, (u64) (s)); \
-											return((s)); })
+#define return_ACPI_STATUS(s)           ACPI_DO_WHILE0 ({			\
+			acpi_ut_status_exit (ACPI_DEBUG_PARAMETERS, (s));	\
+			return((s)); })
+#define return_PTR(s)                   ACPI_DO_WHILE0 ({			\
+			acpi_ut_ptr_exit (ACPI_DEBUG_PARAMETERS, (u8 *) (s));	\
+			return((s)); })
+#define return_VALUE(s)                 ACPI_DO_WHILE0 ({			\
+			acpi_ut_value_exit (ACPI_DEBUG_PARAMETERS, (u64) (s));	\
+			return((s)); })
 #define return_UINT8(s)                 return_VALUE(s)
 #define return_UINT32(s)                return_VALUE(s)
 

@@ -8,6 +8,9 @@ static inline __u16 __get_unaligned_le16(const __u8 *p)
 	return p[0] | p[1] << 8;
 }
 
+/*
+ * 32비트 리틀엔디안을 구한다.
+ */
 static inline __u32 __get_unaligned_le32(const __u8 *p)
 {
 	return p[0] | p[1] << 8 | p[2] << 16 | p[3] << 24;

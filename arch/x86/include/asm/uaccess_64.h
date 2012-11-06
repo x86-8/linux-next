@@ -33,6 +33,9 @@ copy_user_generic(void *to, const void *from, unsigned len)
 	 * Otherwise, if CPU has rep_good feature, use copy_user_generic_string.
 	 * Otherwise, use copy_user_generic_unrolled.
 	 */
+	/* REP 명령을 빠르게 지원하면 string
+	 * 구닥다리 P4면 unrolled
+	 */
 	alternative_call_2(copy_user_generic_unrolled,
 			 copy_user_generic_string,
 			 X86_FEATURE_REP_GOOD,

@@ -11,6 +11,7 @@
  * linkage errors occur due the compiler generating the wrong code to access
  * that section.
  */
+/* percpu섹션에 밀어넣는 매크로 */
 #define __PCPU_ATTRS(sec)						\
 	__percpu __attribute__((section(PER_CPU_BASE_SECTION sec)))	\
 	PER_CPU_ATTRIBUTES
@@ -84,9 +85,10 @@
  * Variant on the per-CPU variable declaration/definition theme used for
  * ordinary per-CPU variables.
  */
+  /* 변수를 export 한다. */
 #define DECLARE_PER_CPU(type, name)					\
 	DECLARE_PER_CPU_SECTION(type, name, "")
-
+ /* 변수를 선언한다. */
 #define DEFINE_PER_CPU(type, name)					\
 	DEFINE_PER_CPU_SECTION(type, name, "")
 

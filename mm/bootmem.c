@@ -587,6 +587,7 @@ static void * __init alloc_arch_preferred_bootmem(bootmem_data_t *bdata,
 					unsigned long size, unsigned long align,
 					unsigned long goal, unsigned long limit)
 {
+	/* 아마도 slab이 부분적으로라도 초기화 되어있으면 WARN */
 	if (WARN_ON_ONCE(slab_is_available()))
 		return kzalloc(size, GFP_NOWAIT);
 
@@ -680,6 +681,7 @@ static void * __init ___alloc_bootmem(unsigned long size, unsigned long align,
 	/*
 	 * Whoops, we cannot satisfy the allocation request.
 	 */
+	/* 0이면 아웃 오브 메모리 */
 	printk(KERN_ALERT "bootmem alloc of %lu bytes failed!\n", size);
 	panic("Out of memory");
 	return NULL;
@@ -698,6 +700,7 @@ static void * __init ___alloc_bootmem(unsigned long size, unsigned long align,
  *
  * The function panics if the request can not be satisfied.
  */
+/* goal에서 최대한 앞쪽에서 할당 */
 void * __init __alloc_bootmem(unsigned long size, unsigned long align,
 			      unsigned long goal)
 {

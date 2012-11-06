@@ -82,7 +82,10 @@ bool parameq(const char *a, const char *b)
 {
 	return parameqn(a, b, strlen(a)+1);
 }
-
+/* 
+ * ret = parse_one(param, val, params, num, unknown);
+ * 인자로 들어온 handle_unknown 함수를 호출한다.
+*/
 static int parse_one(char *param,
 		     char *val,
 		     const char *doing,
@@ -137,8 +140,9 @@ static char *next_arg(char *args, char **param, char **val)
 		in_quote = 1;
 		quoted = 1;
 	}
-
+	/* args는 인자 시작 위치, i=파싱하는 위치, equals은 "=" 위치 */
 	for (i = 0; args[i]; i++) {
+	  /* 따옴표안이 아니고 공백이면 break */
 		if (isspace(args[i]) && !in_quote)
 			break;
 		if (equals == 0) {
@@ -154,9 +158,14 @@ static char *next_arg(char *args, char **param, char **val)
 		*val = NULL;
 	else {
 		args[equals] = '\0';
+		/* val 안에는 "=" 다음의 값에 대한 포인터가 들어간다. */
 		*val = args + equals + 1;
 
 		/* Don't include quotes in value. */
+		/* '"' 가 나오면 마지막 '"'를  null terminated string 으로 만들어준다.
+		 * 처음 if는 a=(val)"a+b" 에서 처음 if는 a="(val)a+b 로 만들어주고
+		 * 두번째 if는 "a=(val)a+b" 일때 끝에 '"'를 없애준다.
+		 */
 		if (**val == '"') {
 			(*val)++;
 			if (args[i-1] == '"')
@@ -173,6 +182,7 @@ static char *next_arg(char *args, char **param, char **val)
 		next = args + i;
 
 	/* Chew up trailing spaces. */
+	/* 다음에 오는 space들도 없앤다. */
 	return skip_spaces(next);
 }
 
@@ -188,6 +198,7 @@ int parse_args(const char *doing,
 	char *param, *val;
 
 	/* Chew leading spaces */
+	/* 앞쪽에 스페이스를 다 없앤다. */
 	args = skip_spaces(args);
 
 	if (*args)
@@ -199,6 +210,9 @@ int parse_args(const char *doing,
 
 		args = next_arg(args, &param, &val);
 		irq_was_disabled = irqs_disabled();
+		/* val 에는 '=' 다음의 문자 포인터를 가르키고 
+		 * param 에는 args의 문자열 처음을 가르키는 포인터		 
+		 */
 		ret = parse_one(param, val, doing, params, num,
 				min_level, max_level, unknown);
 		if (irq_was_disabled && !irqs_disabled())
