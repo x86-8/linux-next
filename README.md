@@ -17,7 +17,9 @@ Tag
 ----
 * Linux 3.7-rc4
   - **v3.7-rc4_study-x86-8-merged**
-  linux-3.2 소스 분석과 머지되었음.
+  linux-3.2 소스 분석과 머지하였음.
 
 * Linux 3.7-rc5
   - **v3.7-rc5_study-x86-8-merged**
+  - **v3.7-rc5_study-x86-8-merged2**
+	Study Log 2012/11/10 과 머지 하였음.
