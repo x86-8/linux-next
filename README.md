@@ -11,4 +11,4 @@ Linux kernel Study Group(iamroot x86-8 beginner)
 
 Linux Kernel 반영 버전
 -----------------------
-linux 3.7-rc4 (git://github.com/torvalds/linux.git)
+linux 3.7-rc5 (git://github.com/torvalds/linux.git)
