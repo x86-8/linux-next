@@ -319,6 +319,9 @@ void * __init __alloc_bootmem_node_nopanic(pg_data_t *pgdat, unsigned long size,
 	return ___alloc_bootmem_node_nopanic(pgdat, size, align, goal, 0);
 }
 
+/* 특정 node에 bootmem을 할당. 메모리 할당을 못하면 panic 발생.
+ * goal은 시작 주소의 목표이지만, 할당이 제대로 안된 경우는 무시될
+ * 수 있다. */
 void * __init ___alloc_bootmem_node(pg_data_t *pgdat, unsigned long size,
 				    unsigned long align, unsigned long goal,
 				    unsigned long limit)
@@ -329,6 +332,8 @@ void * __init ___alloc_bootmem_node(pg_data_t *pgdat, unsigned long size,
 	if (ptr)
 		return ptr;
 
+	/* 이전(3.2) 커널에서는 특정 node 에서 할당이 실패한 경우, MAX_NUMNODES에 할당시도
+	 * 했지만, 현재(3.7)는 바로 panic 발생.  */
 	printk(KERN_ALERT "bootmem alloc of %lu bytes failed!\n", size);
 	panic("Out of memory");
 	return NULL;

@@ -4142,6 +4142,7 @@ void __init free_bootmem_with_active_regions(int nid, unsigned long max_low_pfn)
  * add_active_ranges() contain no holes and may be freed, this
  * function may be used instead of calling memory_present() manually.
  */
+/* nid 에 node_map 에 등록되어 있는 memory영역(사용가능한)을 등록 */
 void __init sparse_memory_present_with_active_regions(int nid)
 {
 	unsigned long start_pfn, end_pfn;
@@ -5290,11 +5291,11 @@ int __meminit init_per_zone_wmark_min(void)
 module_init(init_per_zone_wmark_min)
 
 /*
- * min_free_kbytes_sysctl_handler - just a wrapper around proc_dointvec() so 
+ * min_free_kbytes_sysctl_handler - just a wrapper around proc_dointvec() so
  *	that we can call two helper functions whenever min_free_kbytes
  *	changes.
  */
-int min_free_kbytes_sysctl_handler(ctl_table *table, int write, 
+int min_free_kbytes_sysctl_handler(ctl_table *table, int write,
 	void __user *buffer, size_t *length, loff_t *ppos)
 {
 	proc_dointvec(table, write, buffer, length, ppos);

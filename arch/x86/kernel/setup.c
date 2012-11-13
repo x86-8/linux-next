@@ -747,7 +747,7 @@ void __init setup_arch(char **cmdline_p)
 	printk(KERN_INFO "Command line: %s\n", boot_command_line);
 #endif
 
-	/* 
+	/*
 	 * If we have OLPC OFW, we might end up relocating the fixmap due to
 	 * reserve_top(), so do this before touching the ioremap area.
 	 */
@@ -803,21 +803,21 @@ void __init setup_arch(char **cmdline_p)
 	bootloader_version  = bootloader_type & 0xf;
 	bootloader_version |= boot_params.hdr.ext_loader_ver << 4;
 
-/* 
+/*
  * #define RAMDISK_IMAGE_START_MASK	0x07FF
  * #define RAMDISK_PROMPT_FLAG		0x8000
  * #define RAMDISK_LOAD_FLAG		0x4000
  */
 #ifdef CONFIG_BLK_DEV_RAM
-/* 커널은 initrd 를 보통의 램디스크로 변환하고  initrd 에 의하여 사용된 메모리를 풀어놓는다. 
+/* 커널은 initrd 를 보통의 램디스크로 변환하고  initrd 에 의하여 사용된 메모리를 풀어놓는다.
  * ram_size 옵션은 현재 사용하지 않는다. 옛날에 bootsect.S에서 사용되었다.
  */
 	rd_image_start = boot_params.hdr.ram_size & RAMDISK_IMAGE_START_MASK;
 	rd_prompt = ((boot_params.hdr.ram_size & RAMDISK_PROMPT_FLAG) != 0);
 	rd_doload = ((boot_params.hdr.ram_size & RAMDISK_LOAD_FLAG) != 0);
 #endif
-/* 
- * How differ Bios between efi ? 
+/*
+ * How differ Bios between efi ?
  * The Basic Input/Output System (BIOS) served as the OS-firmware interface for the original PC-XT and PC-AT computers.
  * This interface has been expanded over the years as the "PC clone" market has grown, but was never fully modernized as the market grew.
  * UEFI defines a similar OS-firmware interface, known as "boot services" and "runtime services", but is not specific to any processor architecture.
@@ -840,7 +840,7 @@ void __init setup_arch(char **cmdline_p)
 		efi_enabled = 0;
 #endif
 	/* x86_init_noop : 빈 루틴 */
-	x86_init.oem.arch_setup(); 
+	x86_init.oem.arch_setup();
 
 	/* 물리 메모리 상한선 early_cpu_init에서 호출. */
 	iomem_resource.end = (1ULL << boot_cpu_data.x86_phys_bits) - 1;
@@ -1124,7 +1124,7 @@ void __init setup_arch(char **cmdline_p)
 	/*
 	 * Parse the ACPI tables for possible boot-time SMP configuration.
 	 */
-	/** 
+	/**
 	 * acpi root 테이블을 얻어오고 파싱/설정해준다
 	 */
 	acpi_boot_table_init();
@@ -1160,7 +1160,7 @@ void __init setup_arch(char **cmdline_p)
 
 	tboot_probe();
 
-#ifdef CONFIG_X86_46
+#ifdef CONFIG_X86_64
 	map_vsyscall();
 #endif
 

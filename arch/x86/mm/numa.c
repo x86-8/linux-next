@@ -537,7 +537,7 @@ static int __init numa_register_memblks(struct numa_meminfo *mi)
 
 	/* Account for nodes with cpus and no memory */
         /* 사용가능한 node 정보(node_possible_map)를 meminfo(mi)로 보완
-         * CPU들만 가지고 있는 노드들을 계산해 준다. 
+         * CPU들만 가지고 있는 노드들을 계산해 준다.
          */
 	node_possible_map = numa_nodes_parsed;
 	numa_nodemask_from_meminfo(&node_possible_map, mi);
@@ -599,12 +599,18 @@ static int __init numa_register_memblks(struct numa_meminfo *mi)
  * as the number of CPUs is not known yet. We round robin the existing
  * nodes.
  */
+/* 몇몇 mainboard에서는 cpu 하나에만 memmory가 연결되게 만들어졌기 때문에,
+ * 이걸 방지하기 위해 cpu와 node를 round robin방식(순차적으로 node를 할당)
+ * 으로 연결한다 */
 static void __init numa_init_array(void)
 {
 	int rr, i;
 
 	rr = first_node(node_online_map);
+	/* cpu로부터 node id를 가져와서 활성화 되어 있지않은 노드는
+	 * 제거한다 */
 	for (i = 0; i < nr_cpu_ids; i++) {
+		/* cpu index로 nid로 가져온다 */
 		if (early_cpu_to_node(i) != NUMA_NO_NODE)
 			continue;
 		numa_set_node(i, rr);
